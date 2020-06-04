@@ -1,5 +1,76 @@
 # Release notes
 
+## Version 0.30.0
+
+Introduced capital model for production
+Fixed bug in implementation of correlation to covariance
+Added optional code for risk overlay [see blog](https://qoppac.blogspot.com/2020/05/when-endogenous-risk-management-isnt.html)
+Moved fx cross logic out of sim data into fxPricesData
+Strategies now run backtests from configuration file
+
+## Version 0.29.0
+
+Added price 'spike' checker, and manual price checking service
+Removed PIL library (issue 161)
+Fixed ib_insync PIP issue (pull 162)
+MongoDb logs will now try to email user if a critical error is raised
+
+## Version 0.28.0
+
+IB now uses ib_insync, not native IB library
+
+## Version 0.27.0
+
+Cleaned up way defaults and private config files work
+Removed seperate mongodb config file
+Added production code to run a system backtest and save optimal position state
+Cleaned up the way path and filename resolution works
+Added production code to backup mongodb to .csv files
+
+## Version 0.26.0
+
+Added production code to get daily futures prices from IB, update sampled contracts, update multiple and adjusted prices.
+
+## Version 0.25.0
+
+Can now get individual futures prices from IB, both historical daily and intraday (with get_prices_at_frequency_for_* methods)
+Added code to deal with VIX weekly expiries - they can now be ignored
+Caching IB contract objects in IB client as rather expensive
+IB client will now avoid pacing violations
+Removed futuresContract.simple() method; you can now just do futuresContract("AUDUSD", "yyyymmdd")
+Cleaned up IB client code, error handling is now consistent
+Added  broker_get_contract_expiry_date method to brokerClient and ibClient
+IB connection will now check to see if a clientid is being used even if one is passed. Has '.terminate' method which will try and clear clientid.
+.csv config files are cached in IB price API objects
+
+## Version 0.24.0
+
+Can now pass keyword arguments to data methods when creating a trading rule (Enhancement # 141)
+Fixed bugs relating to building multiple and adjusted prices
+Slight refactoring of futuresContractPrices objects. These only have FINAL, not CLOSE or SETTLE prices now.
+Added more data
+
+## Version 0.23.0
+
+'get_filename_for_package' can now take absolute as well as relative paths, and can cope with seperate file names
+Updated legacy .csv files
+Fixed a few bugs
+Can now get unexpired contracts for a given instrument using 'contractDateWithRollParameters.get_unexpired_contracts_from_now_to_contract_date()'
+
+## Version 0.22.0
+
+*Now requires python 3.6.0, pandas 0.25.2*
+Fixed a few bugs in production functions for FX prices
+Logging now requires an explicit labelling argument, eg `log=logtoscreen("String required here")
+Changed mongodb logging so now indexes on unique ID
+Generally cleaned up logging code
+Moved update fx price logic inside generic fx price object
+
+## Version 0.21.0
+
+Removed dependency on Quandl currency for setting up spot FX, now uses investing.com
+Fixed issues relating to robust vol calc, date offset in roll calendars
+
 ## Version 0.20.0
 
 Started documenting 'how to run a production system'

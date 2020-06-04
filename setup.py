@@ -5,9 +5,9 @@ import platform
 from setuptools import setup, find_packages
 from distutils.version import StrictVersion
 
-if StrictVersion(platform.python_version()) < StrictVersion('3.4.3'):
+if StrictVersion(platform.python_version()) < StrictVersion('3.6.0'):
     print(
-        'pysystemtrade requires Python 3.4.3 or later. Exiting.',
+        'pysystemtrade requires Python 3.6.0 or later. Exiting.',
         file=sys.stderr)
     sys.exit(1)
 
@@ -65,10 +65,10 @@ setup(
     package_data=package_data,
     long_description=read('README.md'),
     install_requires=[
-        "pandas >= 0.19.0", "numpy >= 1.10.1", "matplotlib > 1.4.3",
+        "pandas >= 0.25.2", "numpy >= 1.13.3", "matplotlib > 1.4.3",
         "PyYAML>=3.11", "scipy>=0.17"
     ],
-    tests_requires=['nose', 'flake8'],
+    tests_require=['nose', 'flake8'],
     extras_require=dict(),
     test_suite='nose.collector',
     include_package_data=True)

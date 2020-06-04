@@ -21,19 +21,21 @@ ROOT_WEEKS_IN_YEAR = WEEKS_IN_YEAR**.5
 MONTHS_IN_YEAR = 12.0
 ROOT_MONTHS_IN_YEAR = MONTHS_IN_YEAR**.5
 
-ARBITRARY_START = pd.datetime(1900, 1, 1)
+ARBITRARY_START = datetime.datetime(1900, 1, 1)
 
 HOURS_PER_DAY = 24
 MINUTES_PER_HOUR = 60
 SECONDS_PER_HOUR = 60
+SECONDS_PER_DAY = HOURS_PER_DAY * MINUTES_PER_HOUR * SECONDS_PER_HOUR
 
-SECONDS_IN_YEAR = CALENDAR_DAYS_IN_YEAR * HOURS_PER_DAY * MINUTES_PER_HOUR * SECONDS_PER_HOUR
+SECONDS_IN_YEAR = CALENDAR_DAYS_IN_YEAR * SECONDS_PER_DAY
 UNIXTIME_CONVERTER = 1e9
 
 UNIXTIME_IN_YEAR = UNIXTIME_CONVERTER * SECONDS_IN_YEAR
 
-MONTH_LIST = ["F", "G", "H", "J", "K", "M", "N", "Q", "U", "V", "X", "Z"]
 
+
+MONTH_LIST = ["F", "G", "H", "J", "K", "M", "N", "Q", "U", "V", "X", "Z"]
 
 def month_from_contract_letter(contract_letter):
     """
@@ -102,8 +104,8 @@ def expiry_date(expiry_ident):
         expiry_date = expiry_ident
 
     else:
-        raise Exception(
-            "expiry_date needs to be a string with 4 or 6 digits, ")
+        raise Exception("expiry_ident needs to be a string with 6 or 8 digits, a datetime, or a date;"
+                        f" type={type(expiry_ident)}, value={expiry_ident}")
 
     # 'Natural' form is datetime
     return expiry_date
@@ -233,7 +235,67 @@ def generate_fitting_dates(data, date_method, rollyears=20):
 
     return periods
 
+def time_matches(index_entry, closing_time=pd.DateOffset(hours=12, minutes=0, seconds=0)):
+    if index_entry.hour == closing_time.hours and \
+        index_entry.minute == closing_time.minutes and \
+        index_entry.second == closing_time.seconds:
+
+        return True
+    else:
+        return False
+
+"""
+Convert date into a float, and back again
+"""
+LONG_DATE_FORMAT = "%Y%m%d%H%M%S.%f"
+
+def datetime_to_long(date_to_convert):
+    return float(date_to_convert.strftime(LONG_DATE_FORMAT))
+
+def long_to_datetime(float_to_convert):
+    str_to_convert='{0:.6f}'.format(float_to_convert)
+    converted_datetime = datetime.datetime.strptime(str_to_convert, LONG_DATE_FORMAT)
+    return converted_datetime
+
 
 if __name__ == '__main__':
     import doctest
     doctest.testmod()
+
+
+def adjust_timestamp(index_entry, actual_close = pd.DateOffset(hours = 23, minutes=0, seconds=0),
+                     original_close = pd.DateOffset(hours = 23, minutes=0, seconds=0), time_offset =pd.DateOffset(hours=0)):
+    if (index_entry.hour == 0 and index_entry.minute == 0 and index_entry.second == 0):
+        new_index_entry = index_entry.date() + actual_close
+    elif time_matches(index_entry, original_close):
+        new_index_entry = index_entry.date() + actual_close
+    else:
+        new_index_entry = index_entry + time_offset
+
+    return new_index_entry
+
+def get_datetime_input(prompt, allow_default = True):
+    invalid_input = True
+    input_str = prompt+": Enter date and time in format %Y%-%m-%d eg '2020-05-30' OR '%Y-%m-%d %H:%M:%S' eg '2020-05-30 14:04:11'"
+    if allow_default:
+        input_str = input_str+" <RETURN for now>"
+    while invalid_input:
+        ans = input(input_str)
+        if ans=="" and allow_default:
+            return datetime.datetime.now()
+        try:
+            if len(ans)==10:
+                ans = datetime.datetime.strptime(ans, "%Y-%m-%d")
+            elif len(ans)==19:
+                ans = datetime.datetime.strptime(ans, "%Y-%m-%d %H:%M:%S")
+            else:
+                ## problems formatting will also raise value error
+                raise ValueError
+            invalid_input=False
+            break
+
+        except ValueError:
+            print("%s is not a valid datetime string" % ans)
+            continue
+
+    return ans

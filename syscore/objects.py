@@ -1,8 +1,51 @@
 """
 Do fun things with objects and classes
 """
-
+from collections import  namedtuple
 import importlib
+
+class _named_object():
+    def __init__(self, name):
+        self._name= str(name)
+    def __repr__(self):
+        return self._name
+
+missing_contract = _named_object("missing contract")
+missing_instrument = _named_object("missing instrument")
+missing_file = _named_object("missing file")
+missing_data = _named_object("missing data")
+
+missing_order = _named_object("missing order")
+locked_order = _named_object("locked order")
+duplicate_order = _named_object("duplicate order")
+
+order_is_in_status_finished = _named_object("order status is modification finished")
+order_is_in_status_modified = _named_object("order status is being modified")
+order_is_in_status_not_modified = _named_object("order status is not currently modified")
+order_is_in_status_reject_modification= _named_object("order status is modification rejected")
+
+
+no_order_id = _named_object("no order ID")
+no_children = _named_object("no_children")
+no_parent = _named_object("no parent")
+
+rolling_cant_trade = _named_object("rolling can't trade")
+ROLL_PSEUDO_STRATEGY="_ROLL_PSEUDO_STRATEGY"
+
+data_error = _named_object("data error")
+not_updated = _named_object("not updated")
+
+success = _named_object("success")
+failure = _named_object("failure")
+
+
+
+arg_not_supplied = _named_object("arg not supplied")
+
+report_config = namedtuple("config", "title function output")
+table = namedtuple("table", "Heading Body")
+header = namedtuple("header", "Heading")
+body_text = namedtuple("bodytext", "Text")
 
 
 def get_methods(an_object):
@@ -159,6 +202,8 @@ def hasallattr(some_object, attrlist=[]):
 
     """
     return all([hasattr(some_object, attrname) for attrname in attrlist])
+
+
 
 
 if __name__ == '__main__':

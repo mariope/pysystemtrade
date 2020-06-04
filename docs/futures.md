@@ -10,10 +10,10 @@ It is broken into three sections. The first, [A futures data workflow](#futures_
 
 Although this document is about futures data, parts two and three are necessary reading if you are trying to create or modify any data objects.
 
+
 Table of Contents
 =================
 
-   * [Table of Contents](#table-of-contents)
    * [A futures data workflow](#a-futures-data-workflow)
       * [Setting up some instrument configuration](#setting-up-some-instrument-configuration)
       * [Roll parameter configuration](#roll-parameter-configuration)
@@ -38,19 +38,47 @@ Table of Contents
          * [<a href="/sysdata/futures/rolls.py">Contract date with roll parameters</a>: contractDateWithRollParameters()](#contract-date-with-roll-parameters-contractdatewithrollparameters)
          * [<a href="/sysdata/futures/contracts.py">Futures contracts</a>: futuresContracts() and futuresContractData()](#futures-contracts-futurescontracts-and-futurescontractdata)
          * [<a href="/sysdata/futures/futures_per_contract_prices.py">Prices for individual futures contracts</a>: futuresContractPrices(), dictFuturesContractPrices() and futuresContractPriceData()](#prices-for-individual-futures-contracts-futurescontractprices-dictfuturescontractprices-and-futurescontractpricedata)
+         * [<a href="/sysdata/futures/futures_per_contract_final_prices.py">Final prices for individual futures contracts</a>: futuresContractFinalPrices(), dictFuturesContractFinalPrices()](#final-prices-for-individual-futures-contracts-futurescontractfinalprices-dictfuturescontractfinalprices)
          * [<a href="/sysdata/futures/roll_calendars.py">Roll calendars</a>: rollCalendar() and rollCalendarData()](#roll-calendars-rollcalendar-and-rollcalendardata)
          * [<a href="/sysdata/futures/multiple_prices.py">Multiple prices</a>: futuresMultiplePrices() and futuresMultiplePricesData()](#multiple-prices-futuresmultipleprices-and-futuresmultiplepricesdata)
          * [<a href="/sysdata/futures/adjusted_prices.py">Adjusted prices</a>: futuresAdjustedPrices() and futuresAdjustedPricesData()](#adjusted-prices-futuresadjustedprices-and-futuresadjustedpricesdata)
          * [<a href="/sysdata/fx/spotfx.py">Spot FX data</a>: fxPrices() and fxPricesData()](#spot-fx-data-fxprices-and-fxpricesdata)
       * [Creating your own data objects, and data storage objects; a few pointers](#creating-your-own-data-objects-and-data-storage-objects-a-few-pointers)
       * [Data storage objects for specific sources](#data-storage-objects-for-specific-sources)
-         * [Static csv files used for initialisation](#static-csv-files-used-for-initialisation)
-         * [CSV data](#csv_files)
+         * [Static csv files used for initialisation of databases](#static-csv-files-used-for-initialisation-of-databases)
+            * [csvFuturesInstrumentData()(/sysdata/csv/csv_instrument_config.py) inherits from <a href="#futuresInstrumentData">futuresInstrumentData</a>](#csvfuturesinstrumentdatasysdatacsvcsv_instrument_configpy-inherits-from-futuresinstrumentdata)
+            * [<a href="/sysinit/futures/csv_data_readers/rolldata_from_csv.py">initCsvFuturesRollData()</a> inherits from <a href="#rollParametersData">rollParametersData</a>](#initcsvfuturesrolldata-inherits-from-rollparametersdata)
+         * [Csv files for time series data](#csv-files-for-time-series-data)
+            * [<a href="/sysdata/csv/csv_instrument_config.py">csvFuturesInstrumentData()</a> inherits from <a href="#futuresInstrumentData">futuresInstrumentData</a>](#csvfuturesinstrumentdata-inherits-from-futuresinstrumentdata)
+            * [<a href="/sysdata/csv/csv_spot_fx.py">csvFxPricesData()</a> inherits from <a href="#futuresContractPriceData">futuresContractPriceData</a>](#csvfxpricesdata-inherits-from-futurescontractpricedata)
+            * [<a href="/sysdata/csv/csv_roll_calendars.py">csvRollCalendarData()</a> inherits from <a href="#rollParametersData">rollParametersData</a>](#csvrollcalendardata-inherits-from-rollparametersdata)
+            * [<a href="/sysdata/csv/csv_multiple_prices.py">csvFuturesMultiplePricesData()</a> inherits from <a href="#futuresMultiplePricesData">futuresMultiplePricesData</a>](#csvfuturesmultiplepricesdata-inherits-from-futuresmultiplepricesdata)
+            * [<a href="/sysdata/csv/csv_adjusted_prices.py">csvFuturesAdjustedPricesData()</a> inherits from <a href="#futuresAdjustedPricesData">futuresAdjustedPricesData</a>](#csvfuturesadjustedpricesdata-inherits-from-futuresadjustedpricesdata)
+            * [<a href="/sysdata/csv/csv_spot_fx.py">csvFxPricesData()</a> inherits from <a href="#fxPricesData">fxPricesData</a>](#csvfxpricesdata-inherits-from-fxpricesdata)
          * [mongo DB](#mongo-db)
+            * [Specifying a mongoDB connection](#specifying-a-mongodb-connection)
+            * [<a href="/sysdata/mongodb/mongo_futures_instruments.py">mongoFuturesInstrumentData()</a> inherits from <a href="#futuresInstrumentData">futuresInstrumentData</a>](#mongofuturesinstrumentdata-inherits-from-futuresinstrumentdata)
+            * [<a href="/sysdata/mongodb/mongo_roll_data.py">mongoRollParametersData()</a> inherits from <a href="#rollParametersData">rollParametersData</a>](#mongorollparametersdata-inherits-from-rollparametersdata)
+            * [<a href="/sysdata/mongodb/mongo_futures_contracts.py">mongoFuturesContractData()</a> inherits from <a href="#futuresContractData">futuresContractData</a>](#mongofuturescontractdata-inherits-from-futurescontractdata)
          * [Quandl](#quandl)
+            * [Getting the Quandl python API](#getting-the-quandl-python-api)
+            * [Setting a Quandl API key](#setting-a-quandl-api-key)
+            * [<a href="/sysdata/quandl/quandl_futures.py">quandlFuturesConfiguration()</a>](#quandlfuturesconfiguration)
+            * [<a href="/sysdata/quandl/quandl_futures.py">quandlFuturesContractPriceData()</a> inherits from <a href="#futuresContractPriceData">futuresContractPriceData</a>](#quandlfuturescontractpricedata-inherits-from-futurescontractpricedata)
+            * [<a href="/sysdata/quandl/quandl_spotfx_prices.py">quandlFxPricesData()</a> inherits from <a href="#fxPricesData">fxPricesData</a>](#quandlfxpricesdata-inherits-from-fxpricesdata)
          * [Arctic](#arctic)
+            * [Specifying an arctic connection](#specifying-an-arctic-connection)
+            * [<a href="/sysdata/arctic/arctic_futures_per_contract_prices.py">arcticFuturesContractPriceData()</a> inherits from <a href="#futuresContractPriceData">futuresContractPriceData</a>](#arcticfuturescontractpricedata-inherits-from-futurescontractpricedata)
+            * [<a href="/sysdata/arctic/arctic_multiple_prices.py">arcticFuturesMultiplePricesData()</a> inherits from <a href="#futuresMultiplePricesData">futuresMultiplePricesData()</a>](#arcticfuturesmultiplepricesdata-inherits-from-futuresmultiplepricesdata)
+            * [<a href="/sysdata/arctic/arctic_adjusted_prices.py">arcticFuturesAdjustedPricesData()</a> inherits from <a href="#futuresAdjustedPricesData">futuresAdjustedPricesData()</a>](#arcticfuturesadjustedpricesdata-inherits-from-futuresadjustedpricesdata)
+            * [<a href="/sysdata/arctic/arctic_spotfx_prices.py">arcticFxPricesData()</a> inherits from <a href="#fxPricesData">fxPricesData()</a>](#arcticfxpricesdata-inherits-from-fxpricesdata)
       * [Creating your own data storage objects for a new source](#creating-your-own-data-storage-objects-for-a-new-source)
+   * [simData objects](#simdata-objects)
       * [Provided simData objects](#provided-simdata-objects)
+         * [<a href="/sysdata/csv/csv_sim_futures_data.py">csvFuturesSimData()</a>](#csvfuturessimdata)
+         * [<a href="/sysdata/arctic/arctic_and_mongo_sim_futures_data.py">arcticFuturesSimData()</a>](#arcticfuturessimdata)
+         * [A note about multiple configuration files](#a-note-about-multiple-configuration-files)
+      * [Modifying simData objects](#modifying-simdata-objects)
          * [Getting data from another source](#getting-data-from-another-source)
          * [Back-adjustment 'on the fly'](#back-adjustment-on-the-fly)
          * [Back-adjustment 'on the fly' over several days](#back-adjustment-on-the-fly-over-several-days)
@@ -58,6 +86,7 @@ Table of Contents
          * [Naming convention and inheritance](#naming-convention-and-inheritance)
          * [Multiple inheritance](#multiple-inheritance)
          * [Hooks into data storage objects](#hooks-into-data-storage-objects)
+   * [Updating the provided .csv data from a production system](#updating-the-provided-csv-data-from-a-production-system)
 
 Created by [gh-md-toc](https://github.com/ekalinin/github-markdown-toc)
 
@@ -96,15 +125,23 @@ It's worth explaining the available options for roll configuration. First of all
 
 'RollOffsetDays': This indicates how many calendar days before a contract expires that we'd normally like to roll it. These vary from zero (Korean bonds KR3 and KR10 which you can't roll until the expiry date) up to -1100 (Eurodollar where I like to stay several years out on the curve).
 
-'CarryOffset': Whether we take carry from an earlier dated contract (-1, which is preferable) or a later dated contract (+1, which isn't ideal but if we hold the front contract we have no choice). This calculation is done based on the *priced* roll cycle, so for example for winter crude where the *hold* roll cycle is just 'Z' (we hold December), and the carry offset is -1 we take the previous month in the *priced* roll cycle (which is a full year FGHJKMNQUVXZ) i.e. November (whose code is 'X'). You read more in Appendix B of [my first book](http://www.systematicmoney.org/systematic-trading).
-
 'ExpiryOffset': How many days to shift the expiry date in a month, eg (the day of the month that a contract expires)-1. These values are just here so we can build roughly correct roll calendars (of which more later). In live trading you'd get the actual expiry date for each contract.
+
+Using these two dates together will indicate when we'd ideally roll an instrument, relative to the first of the month.
+
+For example for Bund futures, the ExpiryOffset is 6; the contract notionally expires on day 1+6 = 7th of the month. The RollOffsetDays is -5, so we roll 5 days before this. So we'd normally roll on the 1+6-5 = 2nd day of the month.
+
+Let's take a more extreme example, Eurodollar. The ExpiryOffset is 18, and the roll offset is -1100 (no not a typo!). We'd roll this product 1100 days before it expired on the 19th day of the month.
+
+'CarryOffset': Whether we take carry from an earlier dated contract (-1, which is preferable) or a later dated contract (+1, which isn't ideal but if we hold the front contract we have no choice). This calculation is done based on the *priced* roll cycle, so for example for winter crude where the *hold* roll cycle is just 'Z' (we hold December), and the carry offset is -1 we take the previous month in the *priced* roll cycle (which is a full year FGHJKMNQUVXZ) i.e. November (whose code is 'X'). You read more in Appendix B of [my first book](http://www.systematicmoney.org/systematic-trading).
 
 
 <a name="get_historical_data"></a>
 ## Getting historical data for individual futures contracts
 
 Now let's turn our attention to getting prices for individual futures contracts. We could get this from anywhere, but we'll use [Quandl](https://wwww.quandl.com). Obviously you will need to [get the python Quandl library](#getQuandlPythonAPI), and you may want to [set a Quandl key](#setQuandlKey). 
+
+NOTE: Quandl are no longer supporting free futures data except for a limited number of instruments. I am looking for alternatives, but the most likely outcome is that I will use IB to get historical data although this will only go back one year and excludes closed contracts.
 
 We can also store it, in principal, anywhere but I will be using the open source [Arctic library](https://github.com/manahl/arctic) which was released by my former employers [AHL](https://ahl.com). This sits on top of Mongo DB (so we don't need yet another database) but provides straightforward and fast storage of pandas DataFrames.
 
@@ -198,7 +235,7 @@ We can store these prices in eithier Arctic or .csv files. The [relevant script 
 <a name="back_adjusted_prices"></a>
 ## Creating and storing back adjusted prices
 
-Once we have multiple prices we can then create a backadjusted price series. The [relevant script](/sysinit/futures/multipleprices_from_arcticprices_and_csv_calendars_to_arctic.py) will read multiple prices from Arctic, do the backadjustment, and then write the prices to Arctic. It's easy to modify this to read/write to/from different sources.
+Once we have multiple prices we can then create a backadjusted price series. The [relevant script](/sysinit/futures/adjustedprices_from_mongo_multiple_to_mongo.py) will read multiple prices from Arctic, do the backadjustment, and then write the prices to Arctic. It's easy to modify this to read/write to/from different sources.
 
 
 ## Backadjusting 'on the fly'
@@ -209,14 +246,24 @@ It's also possible to implement the back-adjustment 'on the fly' within your bac
 
 If you don't like panama stitching then you can modify the method. More details later in this document, [here](#futuresAdjustedPrices).
 
-<a name="storing_futures_data"></a>
 
 
 <a name="create_fx_data"></a>
 ## Getting and storing FX data
 
-Although strictly not futures prices we also need spot FX prices to run our simulation. Again we'll get these from Quandl, and in [this simple script](/sysinit/futures/spotfx_from_quandl_to_arctic_and_csv.py) they are written to Arctic and/or .csv files.
+Although strictly not futures prices we also need spot FX prices to run our simulation. The github for pysystemtrade contains spot FX data, but you will probably wish to update it. In live trading we'd use interactive brokers, but for now I'm going to use one of the many free data websites: [investing.com](investing.com)
 
+You need to register and then download enough history. To see how much FX data there already is:
+
+```python
+from sysdata.csv.csv_spot_fx import *
+data=csvFxPricesData()
+data.get_fx_prices("GBPUSD")
+```
+
+Save the files in a directory with no other content, using the filename format "GBPUSD.csv". Using [this simple script](/sysinit/futures/spotfx_from_csvAndInvestingDotCom_to_arctic.py) they are written to Arctic and/or .csv files. You will need to modify the script to point to the right directory, and you can also change the column and formatting parameters to use data from other sources.
+
+<a name="storing_futures_data"></a>
 # Storing and representing futures data
 
 The paradigm for data storage is that we have a bunch of [data objects](#generic_objects) for specific types of data, i.e. futuresInstrument is the generic class for storing static information about instruments. Each of those objects then has a matching *data storage object* which accesses data for that object, i.e. futuresInstrumentData. Then we have [specific instances of those for different data sources](#specific_data_storage), i.e. mongoFuturesInstrumentData for storing instrument data in a mongo DB database. 
@@ -235,7 +282,7 @@ Futures instruments are the things we actually trade, eg Eurodollar futures, but
 
 Note: There is no data storage for contract dates, they are stored only as part of [futures contracts](#futuresContracts).
 
-A contract date allows us to identify a specific [futures contract](#futuresContracts) for a given [instrument](#futuresInstrument). Futures contracts can eithier be for a specific month (eg '201709') or for a specific day (eg '20170903'). The latter is required to support weekly VIX contracts (although in practice I haven't actually written the code to support them fully yet). A monthly date will be represented with trailing zeros, eg '20170900'.
+A contract date allows us to identify a specific [futures contract](#futuresContracts) for a given [instrument](#futuresInstrument). Futures contracts can eithier be for a specific month (eg '201709') or for a specific day (eg '20170903'). The latter is required to support weekly futures contracts, or if we already know the exact expiry date of a given contract. A monthly date will be represented with trailing zeros, eg '20170900'.
 
 We can also store expiry dates in contract dates. This can be done eithier by passing the exact date (which we'd do if we were getting the contract specs from our broker) or an approximate expiry offset, where 0 (the default) means the expiry is on day 1 of the relevant contract month.
 
@@ -276,9 +323,19 @@ The combination of a specific [instrument](#futuresInstrument) and a [contract d
 ### [Prices for individual futures contracts](/sysdata/futures/futures_per_contract_prices.py): futuresContractPrices(), dictFuturesContractPrices() and futuresContractPriceData()
 
 
-The price data for a given contract is just stored as a DataFrame with specific column names. Notice that we store Open, High, Low, Close and Settle prices; but currently in the rest of pysystemtrade we effectively throw away everything except Settle.
+The price data for a given contract is just stored as a DataFrame with specific column names. Notice that we store Open, High, Low, and Final prices; but currently in the rest of pysystemtrade we effectively throw away everything except Final.
+
+(A 'final' price is eithier a close or a settlement price depending on how the data has been parsed from it's underlying source)
 
 `dictFuturesContractPrices`: When calculating roll calendars we work with prices from multiple contracts at once.
+
+<a name="futuresContractFinalPrices"></a>
+### [Final prices for individual futures contracts](/sysdata/futures/futures_per_contract_final_prices.py): futuresContractFinalPrices(), dictFuturesContractFinalPrices()
+
+This is just the final prices alone. There is no data storage required for these since we don't need to store them seperately, just extract them from eithier `futuresContractPrices` or `dictFuturesContractPrices` objects.
+
+`dictFuturesContractFinalPrices`: When calculating roll calendars we work with prices from multiple contracts at once.
+
 
 <a name="rollCalendar"></a>
 ### [Roll calendars](/sysdata/futures/roll_calendars.py): rollCalendar() and rollCalendarData()
@@ -383,6 +440,21 @@ For obvious (?) reasons we only implement get and read methods for .csv files (S
 
 Reads futures configuration information from [here](/data/futures/csvconfig/instrumentconfig.csv) (note this is a seperate file from the one used to initialise the mongoDB database [earlier](#init_instrument_config) although this uses the same class method to get the data). Columns currently used by the simulation engine are: Instrument, Pointsize, AssetClass, Currency, Slippage, PerBlock, Percentage, PerTrade. Extraneous columns don't affect functionality. 
 
+<a name="csvFuturesContractPriceData"></a>
+#### [csvFxPricesData()](/sysdata/csv/csv_spot_fx.py) inherits from [futuresContractPriceData](#futuresContractPriceData)
+
+Reads prices for individual futures contracts. There is no default directory for these as this is provided as a convenience method if you have acquired .csv contract level data and wish to put it into your system. For this reason there is a lot of flexibility in the arguments to allow different formats to be included. As an example, this code will read data downloaded from `barcharts.com` (with files renamed in the format `EDOLLAR_201509.csv`):
+
+```python
+csv_futures_contract_prices = csvFuturesContractPriceData(datapath="/home/username/data/barcharts_csv",
+                                                          input_date_index_name="Date Time",
+                                                          input_skiprows=1, input_skipfooter=1,
+                                                          input_column_mapping=dict(OPEN='Open',
+                                                                                    HIGH='High',
+                                                                                    LOW='Low',
+                                                                                    FINAL='Close'))
+```
+
 <a name="csvRollCalendarData"></a>
 #### [csvRollCalendarData()](/sysdata/csv/csv_roll_calendars.py) inherits from [rollParametersData](#rollParametersData)
 
@@ -422,7 +494,7 @@ You need to specify an IP address (host), and database name when you connect to 
 
 - Firstly, arguments passed to a `mongoDb()` instance, which is then optionally passed to any data object with the argument `mongo_db=mongoDb(host='localhost', database_name='production')` All arguments are optional. 
 - Then, variables set in the [private `.yaml` configuration file](private.private_config.yaml): mongo_host, mongo_db
-- Finally, default arguments hardcoded [in mongo_connection.py](/sysdata/mongodb/mongo_connection.py): DEFAULT_MONGO_DB, DEFAULT_MONGO_HOST, DEFAULT_MONGO_PORT
+- Finally, default arguments in the [system defaults configuration file](systems/provided/defaults.yaml): mongo_host, mongo_db
 
 Note that 'localhost' is equivalent to '127.0.0.1', i.e. this machine. Note also that no port can be specified. This is because the port is hard coded in Arctic. You should stick to the default port 27017.
 
@@ -487,7 +559,9 @@ Reads price data and returns in the form of [futuresContractPrices](#futuresCont
 
 #### [quandlFxPricesData()](/sysdata/quandl/quandl_spotfx_prices.py) inherits from [fxPricesData](#fxPricesData)
 
+DEPRECATE THIS: NO LONGER WORKS
 Reads FX spot prices from QUANDL. Acceses [this .csv file](/sysdata/quandl/QuandlFXConfig.csv) which contains the codes required to get data from Quandl for a specific currency.
+
 
 
 <a name="arctic"></a>
@@ -615,10 +689,10 @@ print(system.accounts.portfolio().sharpe())
 Configuration information about futures instruments is stored in a number of different places:
 
 - Instrument configuration and cost levels in this [.csv file](/data/futures/csvconfig/instrumentconfig.csv), used by default with `csvFuturesSimData` or will be copied to the database with [this script](/sysinit/futures/repocsv_instrument_config.py)
-- Instrument configuration and cost levels in the sysinit module in [this .csv file](/sysinit/futures/config/instrumentconfig.csv), which will be copied to Mongo DB with [this script](/sysinit/futures/instruments_csv_mongo.py)
 - Roll configuration information in [this .csv file](/sysinit/futures/config/rollconfig.csv), which will be copied to Mongo DB with [this script](/sysinit/futures/roll_parameters_csv_mongo.py)
+- Interactive brokers configuration in [this file]() and [this file](https://github.com/robcarver17/pysystemtrade/blob/master/sysbrokers/IB/ibConfigSpotFX.csv) and [this file](https://github.com/robcarver17/pysystemtrade/blob/master/sysbrokers/IB/ibConfigFutures.csv).
 
-The instruments in these lists won't neccessarily match up; not all contracts have prices available in Quandl, and in some places I've included information for contracts that I don't currently trade (so which aren't included in the main simulation .csv configuration file).
+The instruments in these lists won't neccessarily match up, however under DRY there shouldn't be duplicated column headings across files.
 
 The `system.get_instrument_list()` method is used by the simulation to decide which markets to trade; if no explicit list of instruments is included then it will fall back on the method `system.data.get_instrument_list()`. In both the provided simData objects this will resolve to the method `get_instrument_list` in the class which gets back adjusted prices, or in whatever overrides it for a given data source (.csv or Mongo DB). In practice this means it's okay if your instrument configuration (or roll configuration, when used) is a superset of the instruments you have adjusted prices for. But it's not okay if you have adjusted prices for an instrument, but no configuration information.
 

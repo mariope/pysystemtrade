@@ -1,3 +1,10 @@
+"""
+Roll adjusted and multiple prices for a given contract, after checking that we do not have positions
+
+NOTE: this does not update the roll calendar .csv files stored elsewhere. Under DRY the sole source of production
+  roll info is the multiple prices series
+"""
+
 from copy import copy
 import numpy as np
 import pandas as pd
@@ -5,7 +12,195 @@ import pandas as pd
 from sysdata.futures.contracts import  futuresContract
 from sysdata.futures.instruments import futuresInstrument
 from sysdata.futures.multiple_prices import preferred_columns, contract_column_names, price_column_names, futuresMultiplePrices
+from sysdata.futures.adjusted_prices import futuresAdjustedPrices
+
+from syscore.objects import success, failure
+
+
+from sysdata.production.roll_state_storage import \
+    allowable_roll_state_from_current_and_position, explain_roll_state, roll_adj_state, no_state_available, default_state
+
+from sysproduction.get_roll_info import roll_report_config
+from sysproduction.diagnostic.reporting import run_report_with_data_blob, landing_strip
+
+from sysproduction.data.positions import diagPositions, updatePositions
 from sysproduction.data.contracts import diagContracts
+from sysproduction.data.get_data import dataBlob
+from sysproduction.data.prices import diagPrices, updatePrices
+
+
+
+def interactive_update_roll_status(instrument_code: str):
+    """
+    Update the roll state for a particular instrument
+    This includes the option, where possible, to switch the adjusted price series on to a new contract
+
+    :param instrument_code: str
+    :return: None
+    """
+
+    with dataBlob(log_name="Interactive_Update-Roll-Status") as data:
+
+        ## First get the roll info
+        # This will also update to console
+        report_results = run_report_with_data_blob(roll_report_config, data, instrument_code=instrument_code)
+        if report_results is failure:
+            print("Can't run roll report, so can't change status")
+            return failure
+
+        current_roll_status, roll_state_required = get_required_roll_state(data, instrument_code)
+        if roll_state_required is no_state_available:
+            return failure
+
+        update_positions = updatePositions(data)
+        update_positions.set_roll_state(instrument_code, roll_state_required)
+
+        if roll_state_required is roll_adj_state:
+            ## Going to roll adjusted prices
+            roll_result = _roll_adjusted_and_multiple_prices(data, instrument_code)
+            if roll_result is success:
+                ## Return the state back to default (no roll) state
+                data.log.msg("Successful roll! Returning roll state of %s to %s" % (instrument_code, default_state))
+                update_positions.set_roll_state(instrument_code, default_state)
+            else:
+                data.log.msg("Something has gone wrong with rolling adjusted of %s! Returning roll state to previous state of %s" % (instrument_code, current_roll_status))
+                update_positions.set_roll_state(instrument_code, current_roll_status)
+
+        return success
+
+def get_required_roll_state(data, instrument_code):
+    diag_positions = diagPositions(data)
+    diag_contracts = diagContracts(data)
+
+    current_roll_status = diag_positions.get_roll_state(instrument_code)
+    priced_contract_date = diag_contracts.get_priced_contract_id(instrument_code)
+    position_priced_contract = diag_positions.get_position_for_instrument_and_contract_date(instrument_code, priced_contract_date)
+
+    allowable_roll_states = allowable_roll_state_from_current_and_position(current_roll_status, position_priced_contract)
+    max_possible_states = len(allowable_roll_states)-1
+
+    roll_state_required = no_state_available
+    while roll_state_required is no_state_available:
+        display_roll_query_banner(current_roll_status, position_priced_contract, allowable_roll_states)
+        number_of_state_required = input("Which state do you want? [0-%d] " % max_possible_states)
+        try:
+            number_of_state_required = int(number_of_state_required)
+            assert number_of_state_required>=0 # avoid weird behaviour
+            roll_state_required = allowable_roll_states[number_of_state_required]
+        except:
+            print("State %s is not an integer specifying a possible roll state\n" % number_of_state_required)
+            roll_state_required = no_state_available
+            ## will try again
+            continue
+
+        ## Update roll state
+        if roll_state_required != current_roll_status:
+            # check if changing
+            print("")
+            check = input("Changing roll state for %s from %s to %s, are you sure y/n: " %
+                  (instrument_code, current_roll_status, roll_state_required))
+            print("")
+            if check=="y":
+                # happy
+                break
+            else:
+                print("OK. Choose again.")
+                roll_state_required = no_state_available
+                # back to top of loop
+                continue
+
+    return current_roll_status, roll_state_required
+
+def display_roll_query_banner(current_roll_status, position_priced_contract, allowable_roll_states):
+    print(landing_strip(80))
+    print("Current State: %s" % current_roll_status)
+    print("Current position in priced contract %d (if zero can Roll Adjusted prices)" % position_priced_contract)
+    print("")
+    print("These are your options:")
+    print("")
+
+    for state_number, state in enumerate(allowable_roll_states):
+        print("%d) %s: %s" % (state_number, state, explain_roll_state(state)))
+
+    print("")
+
+    return success
+
+def _roll_adjusted_and_multiple_prices(data, instrument_code):
+    """
+    Roll multiple and adjusted prices
+
+    THE POSITION MUST BE ZERO IN THE PRICED CONTRACT! WE DON'T CHECK THIS HERE
+
+    :param data: dataBlob
+    :param instrument_code: str
+    :return:
+    """
+    print(landing_strip(80))
+    print("")
+    print("Rolling adjusted prices!")
+    print("")
+
+    diag_prices = diagPrices(data)
+
+    current_multiple_prices = diag_prices.get_multiple_prices(instrument_code)
+
+    # Only required for potential rollback
+    current_adjusted_prices = diag_prices.get_adjusted_prices(instrument_code)
+
+    try:
+        updated_multiple_prices = update_multiple_prices_on_roll(data, current_multiple_prices, instrument_code)
+        new_adj_prices = futuresAdjustedPrices.stich_multiple_prices(updated_multiple_prices)
+    except Exception as e:
+        data.log.warn("%s : went wrong when rolling: No roll has happened" % e)
+        return failure
+
+    # We want user input before we do anything
+    compare_old_and_new_prices([current_multiple_prices, updated_multiple_prices,
+                                current_adjusted_prices, new_adj_prices],
+                               ["Current multiple prices", "New multiple prices",
+                               "Current adjusted prices", "New adjusted prices"])
+    print("")
+    confirm_roll = input("Confirm roll adjusted prices for %s are you sure y/n:" % instrument_code)
+    if confirm_roll!="y":
+        print("\nUSER DID NOT WANT TO ROLL: Setting roll status back to previous state")
+        return failure
+
+    try:
+        # Apparently good let's try and write rolled data
+        price_updater = updatePrices(data)
+        price_updater.add_adjusted_prices(instrument_code, new_adj_prices,
+                                                                ignore_duplication=True)
+        price_updater.add_multiple_prices(instrument_code, updated_multiple_prices,
+                                                                ignore_duplication=True)
+
+    except Exception as e:
+        data.log.warn("%s went wrong when rolling: Going to roll-back to original multiple/adjusted prices" % e)
+        rollback_adjustment(data, instrument_code, current_adjusted_prices, current_multiple_prices)
+        return failure
+
+    return success
+
+def compare_old_and_new_prices(price_list, price_list_names):
+    for df_prices, df_name in zip(price_list, price_list_names):
+        print(df_name)
+        print("")
+        print(df_prices.tail(6))
+        print("")
+
+def rollback_adjustment(data, instrument_code, current_adjusted_prices, current_multiple_prices):
+    price_updater = updatePrices(data)
+
+    try:
+        price_updater.add_adjusted_prices(instrument_code, current_adjusted_prices,
+                                                                ignore_duplication=True)
+        price_updater.add_multiple_prices(instrument_code, current_multiple_prices,
+                                                                ignore_duplication=True)
+    except Exception as e:
+        data.log.warn("***** ROLLBACK FAILED! %s!You may need to rebuild your data! Check before trading!! *****" % e)
+        return failure
+
+    return success
 
 
 def update_multiple_prices_on_roll(data, current_multiple_prices, instrument_code):
@@ -64,7 +259,7 @@ def update_multiple_prices_on_roll(data, current_multiple_prices, instrument_cod
     new_forward_contract_object = new_price_contract_object.next_held_contract()
     new_carry_contract_object = new_price_contract_object.carry_contract()
 
-    new_price_price = get_final_matched_price_from_contract_object(data, new_price_contract_object, new_multiple_prices)
+    new_price_price = old_forward_contract_last_price
     new_forward_price = get_final_matched_price_from_contract_object(data, new_forward_contract_object,
                                                                      new_multiple_prices)
     new_carry_price = get_final_matched_price_from_contract_object(data, new_carry_contract_object, new_multiple_prices)
@@ -93,8 +288,9 @@ def update_multiple_prices_on_roll(data, current_multiple_prices, instrument_cod
 
 
 def get_final_matched_price_from_contract_object(data, contract_object, new_multiple_prices):
-    data.add_class_list("arcticFuturesContractPriceData")
-    price_series = data.arctic_futures_contract_price.get_prices_for_contract_object(
+
+    diag_prices = diagPrices(data)
+    price_series = diag_prices.get_prices_for_contract_object(
         contract_object).return_final_prices()
 
     price_series_reindexed = price_series.reindex(new_multiple_prices.index)

@@ -1,7 +1,8 @@
+from copy import copy
 import datetime
-from syscore.genutils import are_dicts_equal, none_to_object, object_to_none
-from syscore.objects import  success,  no_order_id, no_children, no_parent
-from syscore.objects import order_is_in_status_finished, order_is_in_status_not_modified, order_is_in_status_modified, order_is_in_status_reject_modification
+import numpy as np
+from syscore.genutils import are_dicts_equal, none_to_object, object_to_none, sign
+from syscore.objects import  success,  no_order_id, no_children, no_parent, missing_order
 
 
 class tradeableObject(object):
@@ -32,11 +33,212 @@ class tradeableObject(object):
         # probably overriden
         return self._definition['object_name']
 
-MODIFICATION_STATUS_NO_MODIFICATION = 'No modification'
-MODIFICATION_STATUS_BEING_MODIFIED = 'Modification in progress'
-MODIFICATION_STATUS_MODIFICATION_FINISHED = 'Modification finished'
-MODIFICATION_STATUS_MODIFICATION_REJECTED = 'Modification rejected'
+class tradeQuantity(object):
+    def __init__(self, trade_or_fill_qty):
+        if type(trade_or_fill_qty) is tradeQuantity:
+            trade_or_fill_qty = trade_or_fill_qty.qty
 
+        elif (type(trade_or_fill_qty) is float) or (type(trade_or_fill_qty) is int):
+            trade_or_fill_qty = [trade_or_fill_qty]
+            ## must be a list
+            assert type(trade_or_fill_qty) is list
+
+        self._trade_or_fill_qty = trade_or_fill_qty
+
+    def __repr__(self):
+        return str(self.qty)
+
+    @property
+    def qty(self):
+        return self._trade_or_fill_qty
+
+    def zero_version(self):
+        len_self = len(self.qty)
+        return tradeQuantity([0] * len_self)
+
+    def fill_less_than_or_equal_to_desired_trade(self, proposed_fill):
+        return all([abs(x)<=abs(y) and x*y>=0 for x,y in zip(proposed_fill.qty, self.qty)])
+
+    def equals_zero(self):
+        return all([x == 0 for x in self.qty])
+
+
+    def __len__(self):
+        return len(self.qty)
+
+    def __eq__(self, other):
+        return all([x == y for x, y in zip(self.qty, other.qty)])
+
+    def __sub__(self, other):
+        assert len(self.qty) == len(other.qty)
+        result = [x-y for x,y in zip(self.qty, other.qty)]
+        result = tradeQuantity(result)
+        return result
+
+    def __add__(self, other):
+        assert len(self.qty) == len(other.qty)
+        result = [x+y for x,y in zip(self.qty, other.qty)]
+        result = tradeQuantity(result)
+        return result
+
+    def __radd__(self, other):
+        if other==0:
+            return self
+        else:
+            return self.__add__(other)
+
+    def __getitem__(self, item):
+        return self._trade_or_fill_qty[item]
+
+    def total_abs_qty(self):
+        abs_qty_list = [abs(x) for x in self.qty]
+        return sum(abs_qty_list)
+
+    def change_trade_size_proportionally(self, new_trade):
+        current_abs_qty = self.total_abs_qty()
+        new_abs_qty = float(new_trade)
+        ratio = new_abs_qty / current_abs_qty
+        new_qty = [int(np.floor(ratio*qty)) for qty in self.qty]
+        self._trade_or_fill_qty = new_qty
+
+    def sort_with_idx(self, idx_list):
+        unsorted = self.qty
+        qty_sorted = [unsorted[idx] for idx in idx_list]
+        self._trade_or_fill_qty = qty_sorted
+
+    def as_int(self):
+        if len(self._trade_or_fill_qty)>1:
+            return missing_order
+        return self._trade_or_fill_qty[0]
+
+    def apply_minima(self, abs_list):
+        ## for each item in _trade and abs_list, return the signed minimum of the zip
+        ## eg if self._trade = [2,-2] and abs_list = [1,1], return [2,-2]
+        applied_list = apply_minima(self._trade_or_fill_qty, abs_list)
+
+        return tradeQuantity(applied_list)
+
+    def apply_min_size(self, min_size):
+        """
+        Cut the trade down proportionally so the smallest leg is min_size
+        eg self = [2], min_size = 1 -> [1]
+        self = [-2,2], min_size = 1 -> [-1,1]
+        self = [-2,4,-2], min_size = 1 -> [-1,2,2]
+        self = [-3,4,-3], min_size = 1 -> [-3,4,-3]
+
+        :param min_size:
+        :return: tradeQuantity
+        """
+
+        new_trade_list = apply_min_size(self._trade_or_fill_qty, min_size)
+        return tradeQuantity(new_trade_list)
+
+    def get_spread_price(self, list_of_prices):
+        assert len(self._trade_or_fill_qty)==len(list_of_prices)
+
+        if len(self._trade_or_fill_qty)==1:
+            return list_of_prices[0]
+
+        # spread price won't make sense otherwise
+        assert sum(self._trade_or_fill_qty)==0
+
+        sign_to_adjust = sign(self._trade_or_fill_qty[0])
+        multiplied_prices = [x*y*sign_to_adjust for x,y in zip(self._trade_or_fill_qty, list_of_prices)]
+
+        return sum(multiplied_prices)
+
+def apply_minima(trade_list, abs_list):
+    ## for each item in _trade and abs_list, return the signed minimum of the zip
+    ## eg if self._trade = [2,-2] and abs_list = [1,1], return [2,-2]
+    abs_trade_list = [abs(x) for x in trade_list]
+    abs_size_ratio_list = [min([x,y])/float(x) for x,y in zip(abs_trade_list, abs_list)]
+    min_abs_size_ratio = min(abs_size_ratio_list)
+    smallest_abs_leg = min(abs_trade_list)
+    new_smallest_leg = np.floor(smallest_abs_leg *min_abs_size_ratio)
+    ratio_applied = new_smallest_leg / smallest_abs_leg
+    trade_list_with_ratio_as_float = [x*ratio_applied for x in trade_list]
+    trade_list_with_ratio_as_int = [int(x) for x in trade_list_with_ratio_as_float]
+    diff = [abs(x-y) for x,y in zip(trade_list_with_ratio_as_float, trade_list_with_ratio_as_int)]
+    largediff = any([x>0.0001 for x in diff])
+    if largediff:
+        trade_list_with_ratio_as_int = [0]*len(trade_list)
+
+    return trade_list_with_ratio_as_int
+
+def apply_min_size(trade_list, min_size):
+    """
+    Cut the trade down proportionally so the smallest leg is min_size
+    eg self = [2], min_size = 1 -> [1]
+    self = [-2,2], min_size = 1 -> [-1,1]
+    self = [-2,4,-2], min_size = 1 -> [-1,2,2]
+    self = [-3,4,-3], min_size = 1 -> [-3,4,-3]
+
+    :param min_size:
+    :return: tradeQuantity
+    """
+    abs_trade_list = [abs(x) for x in trade_list]
+    smallest_abs_leg = min(abs_trade_list)
+    new_smallest_leg = min_size
+    ratio_applied = new_smallest_leg / smallest_abs_leg
+    trade_list_with_ratio_as_float = [x*ratio_applied for x in trade_list]
+    trade_list_with_ratio_as_int = [int(x) for x in trade_list_with_ratio_as_float]
+    diff = [abs(x-y) for x,y in zip(trade_list_with_ratio_as_float, trade_list_with_ratio_as_int)]
+    largediff = any([x>0.0001 for x in diff])
+    if largediff:
+        return trade_list
+
+    return trade_list_with_ratio_as_int
+
+
+class fillPrice(object):
+    def __init__(self, fill_price):
+        if type(fill_price) is fillPrice:
+            fill_price = fill_price.price
+        if (type(fill_price) is float) or (type(fill_price) is int):
+            fill_price = [fill_price]
+        ## must be a list
+        assert type(fill_price) is list
+
+        self._price = fill_price
+
+    def __repr__(self):
+        return str(self.price)
+
+    @property
+    def price(self):
+        return self._price
+
+    @classmethod
+    def nan_from_trade_qty(fillPrice, trade_qty):
+        len_self = len(trade_qty.qty)
+        return fillPrice([np.nan]*len_self)
+
+    def sort_with_idx(self, idx_list):
+        unsorted = self.price
+        price_sorted = [unsorted[idx] for idx in idx_list]
+        self._price = price_sorted
+
+    def __getitem__(self, item):
+        return self._price[item]
+
+    def __len__(self):
+        return len(self.price)
+
+
+
+def resolve_trade_fill_fillprice(trade, fill, filled_price):
+    resolved_trade = tradeQuantity(trade)
+    if fill is None:
+        resolved_fill = resolved_trade.zero_version()
+    else:
+        resolved_fill = tradeQuantity(fill)
+
+    if filled_price is None:
+        resolved_filled_price = fillPrice.nan_from_trade_qty(resolved_trade)
+    else:
+        resolved_filled_price = fillPrice(filled_price)
+
+    return resolved_trade, resolved_fill, resolved_filled_price
 
 class Order(object):
     """
@@ -47,23 +249,23 @@ class Order(object):
     """
 
 
-    def __init__(self, object_name, trade: int, fill=0, filled_price = None, fill_datetime = None,
+    def __init__(self, object_name, trade, fill=None, filled_price = None, fill_datetime = None,
                  locked=False, order_id=no_order_id,
-                 modification_status = MODIFICATION_STATUS_NO_MODIFICATION,
+                 modification_status = None,
                  modification_quantity = None, parent=no_parent,
                  children=no_children, active=True,
                  **kwargs):
         """
 
         :param object_name: name for a tradeableObject, str
-        :param trade: trade we want to do, int
+        :param trade: trade we want to do, int or list
         :param fill: fill done so far, int
         :param fill_datetime: when fill done (if multiple, is last one)
         :param fill_price: price of fill (if multiple, is last one)
         :param locked: if locked an order can't be modified, bool
         :param order_id: ID given to orders once in the stack, do not use when creating order
-        :param modification_status: whether the order is being modified, str
-        :param modification_quantity: The new quantity trade we want to do once modified, int
+        :param modification_status: NOT USED
+        :param modification_quantity: NOT USED
         :param parent: int, order ID of parent order in upward stack
         :param children: list of int, order IDs of child orders in downward stack
         :param active: bool, inactive orders have been filled or cancelled
@@ -71,10 +273,12 @@ class Order(object):
         """
         self._tradeable_object = tradeableObject(object_name)
 
-        self._trade = trade
-        self._fill = fill
+        resolved_trade, resolved_fill, resolved_filled_price = resolve_trade_fill_fillprice(trade, fill, filled_price)
+
+        self._trade = resolved_trade
+        self._fill = resolved_fill
+        self._filled_price = resolved_filled_price
         self._fill_datetime = fill_datetime
-        self._filled_price = filled_price
         self._locked = locked
         self._order_id = order_id
         self._modification_status = modification_status
@@ -94,21 +298,39 @@ class Order(object):
             active_str = "INACTIVE"
         else:
             active_str = ""
-        return "(Order ID:%s) For %s, qty %s fill %s, %s(qty %s), Parent:%s Child:%s %s %s" % (str(self.order_id), str(self.key), str(self.trade), str(self.fill),
-                                          str(self._modification_status), str(self._modification_quantity),
+        return "(Order ID:%s) For %s, qty %s fill %s,  Parent:%s Child:%s %s %s" % (str(self.order_id), str(self.key), str(self.trade), str(self.fill),
                                           str(self._parent), str(self._children), lock_str, active_str)
 
     @property
     def trade(self):
-        return self._trade
+        return tradeQuantity(self._trade)
+
+    def replace_trade_only_use_for_unsubmitted_trades(self, new_trade):
+        # if this is a single leg trade, does a straight replacement
+        # otherwise
+
+        new_order = copy(self)
+        new_order._trade = tradeQuantity(new_trade)
+
+        return new_order
+
+    def change_trade_size_proportionally(self, new_trade):
+        # if this is a single leg trade, does a straight replacement
+        # otherwise
+
+        new_order = copy(self)
+        new_order._trade.change_trade_size_proportionally(new_trade)
+
+        return new_order
+
 
     @property
     def fill(self):
-        return self._fill
+        return tradeQuantity(self._fill)
 
     @property
     def filled_price(self):
-        return self._filled_price
+        return fillPrice(self._filled_price)
 
     @property
     def fill_datetime(self):
@@ -117,41 +339,27 @@ class Order(object):
 
     def fill_order(self, fill_qty, filled_price = None, fill_datetime = None):
         # Fill qty is cumulative, eg this is the new amount filled
-        try:
-            assert self.fill_less_than_or_equal_to_desired_trade(fill_qty)
-        except:
-            raise Exception("Can't fill order for more than trade quantity")
+        fill_qty = tradeQuantity(fill_qty)
+
+        assert self.trade.fill_less_than_or_equal_to_desired_trade(fill_qty), "Can't fill order for more than trade quantity"
 
         self._fill = fill_qty
         if filled_price is not None:
-            self._filled_price = filled_price
+            self._filled_price = fillPrice(filled_price)
+
         if fill_datetime is None:
             fill_datetime = datetime.datetime.now()
 
         self._fill_datetime = fill_datetime
 
-
-    def fill_less_than_or_equal_to_desired_trade(self, proposed_fill
-                                                 ):
-        return proposed_fill<=self.trade
-
     def fill_equals_zero(self):
-        return self.fill==0
-
-    def new_qty_less_than_fill(self, new_qty):
-        return new_qty<self.fill
+        return self.fill.equals_zero()
 
     def fill_equals_desired_trade(self):
         return self.fill==self.trade
 
     def is_zero_trade(self):
-        return self.trade==0
-
-    def fill_equals_modification_quantity(self):
-        if self.modification_quantity is None:
-            return False
-        else:
-            return self.modification_quantity == self.fill
+        return self.trade.equals_zero()
 
     @property
     def order_id(self):
@@ -172,13 +380,47 @@ class Order(object):
 
     @children.setter
     def children(self, children):
+        if type(children) is int:
+            children = [children]
         if self._children==no_children:
             self._children = children
         else:
-            raise Exception("Can't add children to order which already has them")
+            raise Exception("Can't add children to order which already has them: use add another child")
 
     def remove_children(self):
         self._children = no_children
+
+    def add_another_child(self, new_child):
+        if self.children is no_children:
+            new_children = [new_child]
+        else:
+            new_children = self.children + [new_child]
+
+        self._children = new_children
+
+    @property
+    def remaining(self):
+        return self.trade - self.fill
+
+    def order_with_remaining(self):
+        new_order = copy(self)
+        new_trade = self.remaining
+        new_order._trade = new_trade
+        new_order._fill = new_trade.zero_version()
+        new_order._filled_price = fillPrice.nan_from_trade_qty(new_trade)
+        new_order._fill_datetime = None
+
+        return new_order
+
+    def order_with_min_size(self, min_size):
+        new_order = copy(self)
+        new_trade = new_order.trade.apply_min_size(min_size)
+        new_order._trade = new_trade
+
+        return new_order
+
+    def set_trade_to_fill(self):
+        self._trade = self._fill
 
     @property
     def parent(self):
@@ -199,124 +441,24 @@ class Order(object):
         ## Once deactivated: filled or cancelled, we can never go back!
         self._active = False
 
-    @property
-    def modification_status(self):
-        return self._modification_status
-
-    @property
-    def modification_quantity(self):
-        return self._modification_quantity
-
-    def modify_order(self, new_quantity):
-        # Will not automatically modify child orders
-        if self.is_order_being_modified():
-            # already being modified
-            return order_is_in_status_modified
-        elif self.is_order_finished_modifying():
-            # can't start a new modification just yet
-            return order_is_in_status_finished
-        elif self.is_order_modification_rejected():
-            # a previous modification has been rejected and needs clearing
-            return order_is_in_status_reject_modification
-
-        if self.new_qty_less_than_fill(new_quantity):
-            result = self.reject_modification()
-            return result
-
-        self._modification_status = MODIFICATION_STATUS_BEING_MODIFIED
-        self._modification_quantity = new_quantity
-
-        return success
-
-    def reject_modification(self):
-        ## The modification is unwelcome
-        if self.is_order_finished_modifying():
-            # can't start a new modification just yet
-            return order_is_in_status_finished
-
-        self._modification_status = MODIFICATION_STATUS_MODIFICATION_REJECTED
-
-        return success
-
-    def modification_complete(self):
-        ## The modification of the order and any child orders is complete
-        ## The appearance of this status allows us to flag up that parent orders are also complete
-        if self.is_order_finished_modifying():
-            # already complete no need to change status
-            return success
-        if self.is_order_no_modification():
-            # no modification is happening
-            return order_is_in_status_not_modified
-
-        if self.is_order_modification_rejected():
-            # modification has been rejected, certainly can't complete it
-            return order_is_in_status_reject_modification
-
-        self._modification_status = MODIFICATION_STATUS_MODIFICATION_FINISHED
-
-        return success
-
-    def clear_modification(self):
-        # Next stage is to clear the modification. This will return it to a normal state
-        # We will only do this once all the implications of the modification are known up to the parent order
-        if self.is_order_being_modified():
-            # need to complete first
-            return order_is_in_status_modified
-
-        if self.is_order_no_modification():
-            # already in correct state
-            return success
-
-        # Order is rejected or finished: both are good
-        if self.is_order_modification_rejected():
-            # Rejected; don't apply modification
-            pass
-        elif self.is_order_finished_modifying():
-            self._trade = self._modification_quantity
-
-        ## Remove the modification details
-        self._modification_quantity = None
-        self._modification_status = MODIFICATION_STATUS_NO_MODIFICATION
-
-        return success
-
-    def is_order_no_modification(self):
-        modify_status = self.modification_status
-        return modify_status ==  MODIFICATION_STATUS_NO_MODIFICATION
-
-    def is_order_being_modified(self):
-        modify_status = self.modification_status
-        return modify_status ==  MODIFICATION_STATUS_BEING_MODIFIED
-
-    def is_order_finished_modifying(self):
-        modify_status = self.modification_status
-        return modify_status == MODIFICATION_STATUS_MODIFICATION_FINISHED
-
-    def is_order_modification_rejected(self):
-        modify_status = self.modification_status
-        return modify_status == MODIFICATION_STATUS_MODIFICATION_REJECTED
-
-    def is_order_in_modification_states(self):
-        if self.is_order_being_modified() or self.is_order_finished_modifying() or \
-            self.is_order_modification_rejected():
-
-            return True
-        else:
-            return False
+    def zero_out(self):
+        zero_version = self.trade.zero_version()
+        self._fill = zero_version
+        self.deactivate()
 
     def as_dict(self):
         object_dict = dict(key = self.key)
-        object_dict['trade'] = self._trade
-        object_dict['fill'] = self._fill
-        object_dict['fill_datetime'] = self._fill_datetime
-        object_dict['filled_price'] = self._filled_price
+        object_dict['trade'] = self.trade.qty
+        object_dict['fill'] = self.fill.qty
+        object_dict['fill_datetime'] = self.fill_datetime
+        object_dict['filled_price'] = self.filled_price.price
         object_dict['locked'] = self._locked
-        object_dict['order_id'] = object_to_none(self._order_id, no_order_id)
+        object_dict['order_id'] = object_to_none(self.order_id, no_order_id)
         object_dict['modification_status'] = self._modification_status
         object_dict['modification_quantity'] = self._modification_quantity
-        object_dict['parent'] = object_to_none(self._parent, no_parent)
-        object_dict['children'] = object_to_none(self._children, no_children)
-        object_dict['active'] = self._active
+        object_dict['parent'] = object_to_none(self.parent, no_parent)
+        object_dict['children'] = object_to_none(self.children, no_children)
+        object_dict['active'] = self.active
         for info_key, info_value in self._order_info.items():
             object_dict[info_key] = info_value
 
@@ -381,3 +523,12 @@ class Order(object):
 
         return same_def and same_trade
 
+    def log_with_attributes(self, log):
+        """
+        Returns a new log object with instrument_order attributes added
+
+        :param log: logger
+        :return: log
+        """
+
+        raise NotImplementedError

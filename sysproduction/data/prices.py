@@ -1,4 +1,5 @@
 from sysdata.futures.futures_per_contract_prices import dictFuturesContractPrices
+from sysdata.private_config import get_private_then_default_key_value
 from sysproduction.data.get_data import dataBlob
 from syscore.objects import missing_contract, arg_not_supplied, missing_data
 import numpy as np
@@ -12,6 +13,10 @@ class diagPrices(object):
         data.add_class_list("arcticFuturesContractPriceData arcticFuturesAdjustedPricesData \
          arcticFuturesMultiplePricesData mongoFuturesContractData ")
         self.data = data
+
+    def get_intraday_frequency_for_historical_download(self):
+        intraday_frequency = get_private_then_default_key_value("intraday_frequency")
+        return intraday_frequency
 
     def get_adjusted_prices(self, instrument_code):
         return self.data.db_futures_adjusted_prices.get_adjusted_prices(instrument_code)
@@ -103,8 +108,7 @@ class updatePrices(object):
 def get_valid_instrument_code_from_user(data=arg_not_supplied):
     if data is arg_not_supplied:
         data = dataBlob()
-    price_data = diagPrices(data)
-    all_instruments = price_data.get_list_of_instruments_in_multiple_prices()
+    all_instruments = get_list_of_instruments(data)
     invalid_input = True
     while invalid_input:
         instrument_code = input("Instrument code?")
@@ -112,3 +116,7 @@ def get_valid_instrument_code_from_user(data=arg_not_supplied):
             return instrument_code
 
         print("%s is not in list %s" % (instrument_code, all_instruments))
+
+def get_list_of_instruments(data= arg_not_supplied):
+    price_data = diagPrices(data)
+    return price_data.get_list_of_instruments_in_multiple_prices()

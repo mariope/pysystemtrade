@@ -1,19 +1,23 @@
 import datetime
 import pandas as pd
-import re
+from copy import copy
 
-from collections import namedtuple
 
-from ib_insync import Forex, Future, util
-from ib_insync.order import MarketOrder
+from ib_insync import Forex,  util, ComboLeg
+from ib_insync.order import MarketOrder, LimitOrder
 
 from sysdata.fx.spotfx import currencyValue
 from sysbrokers.baseClient import brokerClient
-from syscore.genutils import NOT_REQUIRED
+
 from syscore.objects import missing_contract, arg_not_supplied, missing_order
+from syscore.genutils import list_of_ints_with_highest_common_factor_positive_first
 from syscore.dateutils import adjust_timestamp
 from syslogdiag.log import logtoscreen
 
+
+from sysbrokers.IB.ib_trading_hours import get_trading_hours
+from sysbrokers.IB.ib_contracts import ib_futures_instrument, resolve_multiple_expiries, ib_futures_instrument_just_symbol
+from sysbrokers.IB.ib_positions import from_ib_positions_to_dict, resolveBS,  resolveBS_for_list, extract_fx_balances_from_account_summary
 
 _PACING_PERIOD_SECONDS = 10*60
 _PACING_PERIOD_LIMIT = 60
@@ -35,26 +39,38 @@ class ibClient(brokerClient):
         ## means our first call won't be throttled for pacing
         self.last_historic_price_calltime = datetime.datetime.now()-  datetime.timedelta(seconds=_PACING_PERIOD_SECONDS)
 
+    def broker_fx_balances(self):
+        account_summary = self.ib.accountSummary()
+        fx_balance_dict = extract_fx_balances_from_account_summary(account_summary)
 
-    def broker_get_orders(self):
+        return fx_balance_dict
+
+    def broker_get_orders(self, account_id=arg_not_supplied):
         """
         Get all trades, orders and return them with the information needed
 
         :return: list
         """
         trades_in_broker_format = self.ib.trades()
-        order_list = [extract_trade_info(trade_to_process) for trade_to_process in trades_in_broker_format]
+        if account_id is not arg_not_supplied:
+            trades_in_broker_format_this_account = [trade for trade in trades_in_broker_format
+                                                    if trade.order.account == account_id]
+        else:
+            trades_in_broker_format_this_account = trades_in_broker_format
+        trades_in_broker_format_with_legs = [self.add_contract_legs_to_order(raw_order_from_ib)
+                                             for raw_order_from_ib in trades_in_broker_format_this_account]
 
-        return order_list
+        return trades_in_broker_format_with_legs
 
     # Methods in parent class overriden here
     # These methods should abstract the broker completely
-    def broker_submit_single_leg_order(self, contract_object_with_ib_data, trade, account,
+
+    def broker_submit_order(self, contract_object_with_ib_data, trade_list, account,
                                                   order_type = "market",
                                                   limit_price = None):
         """
 
-        :param ibcontract: contract_object_with_ib_broker_config: contract where instrument has ib metadata
+        :param ibcontract: contract_object_with_ib_data: contract where instrument has ib metadata
         :param trade: int
         :param account: str
         :param order_type: str, market or limit
@@ -64,23 +80,22 @@ class ibClient(brokerClient):
 
         """
 
-        if order_type=="market":
-            trade_object = self.ib_submit_single_leg_market_order(contract_object_with_ib_data, trade, account)
-        else:
-            self.log.critical("Order type %s is not supported for order on %s" % (order_type, str(contract_object_with_ib_data)))
-            return missing_order
+        placed_broker_trade_object = self.ib_submit_order(contract_object_with_ib_data, trade_list,
+                                                                            account=account, order_type=order_type,
+                                                                     limit_price= limit_price)
 
-        return trade_object
+        return placed_broker_trade_object
 
-    def broker_get_positions(self):
+    def broker_get_positions(self, account_id=arg_not_supplied):
         ## Get all the positions
         ## We return these as a dict of pd DataFrame
         ## dict entries are asset classes, columns are IB symbol, contract ID, contract expiry
 
         raw_positions = self.ib.positions()
-        dict_of_positions = from_ib_positions_to_dict(raw_positions)
+        dict_of_positions = from_ib_positions_to_dict(raw_positions, account_id=account_id)
 
         return dict_of_positions
+
 
     def broker_get_futures_contract_list(self, instrument_object_with_ib_config):
 
@@ -95,6 +110,34 @@ class ibClient(brokerClient):
 
         return contract_dates
 
+
+    def broker_fx_market_order(self,  trade, ccy1, account = arg_not_supplied, ccy2="USD"):
+        """
+        Get some spot fx data
+
+        :param ccy1: first currency in pair
+        :param ccy2: second currency in pair
+        :param qty:
+        :return: broker order object
+        """
+
+        ccy_code = ccy1 + ccy2
+        specific_log = self.log.setup(currency_code = ccy_code)
+
+        ibcontract = self.ib_spotfx_contract(ccy1, ccy2=ccy2, log=specific_log)
+        if ibcontract is missing_contract:
+            return missing_contract
+
+        ib_BS_str, ib_qty = resolveBS(trade)
+        ib_order = MarketOrder(ib_BS_str, ib_qty)
+        if account!='':
+            ib_order.account = account
+        order_object = self.ib.placeOrder(ibcontract, ib_order)
+
+        # for consistency with spread orders
+        trade_with_contract = tradeWithContract(ibcontractWithLegs(ibcontract), order_object)
+
+        return trade_with_contract
 
 
     def broker_get_daily_fx_data(self, ccy1, ccy2="USD", bar_freq="D"):
@@ -207,24 +250,160 @@ class ibClient(brokerClient):
     # IB specific methods
     # Called by parent class generics
 
-    def ib_submit_single_leg_market_order(self, contract_object_with_ib_data, trade, account):
-        ibcontract = self.ib_futures_contract(contract_object_with_ib_data)
+    def add_contract_legs_to_order(self, raw_order_from_ib):
+        combo_legs = getattr(raw_order_from_ib.contract, "comboLegs", [])
+        legs_data = []
+        for leg in combo_legs:
+            contract_for_leg = self.ib_get_contract_with_conId(raw_order_from_ib.contract.symbol, leg.conId)
+            legs_data.append(contract_for_leg)
+        ibcontract_with_legs = ibcontractWithLegs(raw_order_from_ib.contract, legs=legs_data)
+        trade_with_contract = tradeWithContract(ibcontract_with_legs, raw_order_from_ib)
+
+        return trade_with_contract
+
+    def get_ticker_object(self, contract_object_with_ib_data,
+                            trade_list_for_multiple_legs = None):
+
+        specific_log = self.log.setup(instrument_code = contract_object_with_ib_data.instrument_code,
+                                      contract_date = contract_object_with_ib_data.date)
+
+        ibcontract = self.ib_futures_contract(contract_object_with_ib_data,
+                                              trade_list_for_multiple_legs = trade_list_for_multiple_legs)
+        if ibcontract is missing_contract:
+            specific_log.warn("Can't find matching IB contract for %s" % str(contract_object_with_ib_data))
+            return missing_contract
+
+        self.ib.reqMktData(ibcontract, '', False, False)
+        ticker = self.ib.ticker(ibcontract)
+
+        ib_BS_str, ib_qty = resolveBS_for_list(trade_list_for_multiple_legs)
+
+        ticker_with_bs = tickerWithBS(ticker, ib_BS_str)
+
+        return ticker_with_bs
+
+    def cancel_market_data_for_contract_object(self, contract_object_with_ib_data,
+                            trade_list_for_multiple_legs = None):
+
+        specific_log = self.log.setup(instrument_code = contract_object_with_ib_data.instrument_code,
+                                      contract_date = contract_object_with_ib_data.date)
+
+        ibcontract = self.ib_futures_contract(contract_object_with_ib_data,
+                                              trade_list_for_multiple_legs = trade_list_for_multiple_legs)
+        if ibcontract is missing_contract:
+            specific_log.warn("Can't find matching IB contract for %s" % str(contract_object_with_ib_data))
+            return missing_contract
+
+        self.ib.cancelMktData(ibcontract)
+
+    def ib_get_recent_bid_ask_tick_data(self, contract_object_with_ib_data, trade_list_for_multiple_legs = None,
+                                        tick_count = 200):
+        """
+
+        :param contract_object_with_ib_data:
+        :return:
+        """
+        specific_log = self.log.setup(instrument_code = contract_object_with_ib_data.instrument_code,
+                                      contract_date = contract_object_with_ib_data.date)
+        if contract_object_with_ib_data.is_spread_contract():
+            raise Exception("Can't get historical data for combo")
+
+        ibcontract = self.ib_futures_contract(contract_object_with_ib_data,
+                                              trade_list_for_multiple_legs = trade_list_for_multiple_legs)
+        if ibcontract is missing_contract:
+            specific_log.warn("Can't find matching IB contract for %s" % str(contract_object_with_ib_data))
+            return missing_contract
+        recent_ib_time = self.ib.reqCurrentTime() - datetime.timedelta(seconds=60)
+
+        tick_data = self.ib.reqHistoricalTicks(ibcontract, recent_ib_time, '', tick_count, 'BID_ASK', useRth=False)
+
+        return tick_data
+
+    def ib_get_trading_hours(self, contract_object_with_ib_data):
+        ib_contract = self.ib_futures_contract(contract_object_with_ib_data, always_return_single_leg=True)
+        if ib_contract is missing_contract:
+            return missing_contract
+
+        ib_contract_details = self.ib.reqContractDetails(ib_contract)[0]
+
+        try:
+            trading_hours = get_trading_hours(ib_contract_details)
+        except Exception as e:
+            self.log.critical("%s when getting trading hours!" % e)
+            return missing_contract
+
+
+        return trading_hours
+
+    def modify_limit_price_given_original_objects(self,
+                                                  original_order_object, original_contract_object_with_legs,
+                                                  new_limit_price):
+        original_contract_object = original_contract_object_with_legs.ibcontract
+        original_order_object.lmtPrice = new_limit_price
+
+        new_trade_object = self.ib.placeOrder(original_contract_object, original_order_object)
+
+        new_trade_with_contract = tradeWithContract(original_contract_object_with_legs, new_trade_object)
+
+        return new_trade_with_contract
+
+
+
+
+    def ib_cancel_order(self, original_order_object):
+        new_trade_object = self.ib.cancelOrder(original_order_object)
+
+        return new_trade_object
+
+    def ib_check_order_is_cancelled(self, original_order_object):
+        return original_order_object.OrderStatus == 'Cancelled'
+
+    def ib_submit_order(self, contract_object_with_ib_data, trade_list, account="", order_type = "market",
+                                   limit_price=None):
+
+        if contract_object_with_ib_data.is_spread_contract():
+            ibcontract_with_legs = self.ib_futures_contract(contract_object_with_ib_data,
+                                                            trade_list_for_multiple_legs=trade_list,
+                                                            return_leg_data=True)
+            ibcontract = ibcontract_with_legs.ibcontract
+        else:
+            ibcontract = self.ib_futures_contract(contract_object_with_ib_data)
+            ibcontract_with_legs = ibcontractWithLegs(ibcontract)
+
         if ibcontract is missing_contract:
             return missing_order
-        ## account?!s
-        ib_BS_str, ib_qty = resolveBS(trade)
-        ib_order = MarketOrder(ib_BS_str, ib_qty)
+
+        ib_BS_str, ib_qty = resolveBS_for_list(trade_list)
+
+        if order_type=="market":
+            ib_order = MarketOrder(ib_BS_str, ib_qty)
+        elif order_type=="limit":
+            if limit_price is None:
+                self.log.critical("Need to have limit price with limit order!")
+                return missing_order
+            else:
+                ib_order = LimitOrder(ib_BS_str, ib_qty, limit_price)
+        else:
+            self.log.critical("Order type %s not recognised!" % order_type)
+            return missing_order
+
         if account!='':
             ib_order.account = account
-        trade = self.ib.placeOrder(ibcontract, ib_order)
 
-        return trade
+        order_object = self.ib.placeOrder(ibcontract, ib_order)
+
+        # for consistency with spread orders
+        trade_with_contract = tradeWithContract(ibcontract_with_legs, order_object)
+
+        return trade_with_contract
+
+
 
     def _get_generic_data_for_contract(self, ibcontract, log=None, bar_freq="D", whatToShow='TRADES'):
         """
         Get historical daily data
 
-        :param contract_object_with_ib_broker_config: contract where instrument has ib metadata
+        :param contract_object_with_ib_data: contract where instrument has ib metadata
         :param freq: str; one of D, H, 5M, M, 10S, S
         :return: futuresContractPriceData
         """
@@ -260,54 +439,82 @@ class ibClient(brokerClient):
 
         return ibcontract
 
-    def ib_futures_contract(self, futures_contract_object):
+    def ib_futures_contract(self, futures_contract_object, always_return_single_leg = False,
+                            trade_list_for_multiple_legs = None, return_leg_data=False):
         """
-        Return a complete and unique IB contract that matches futures_contract_object
+        Return a complete and unique IB contract that matches contract_object_with_ib_data
         Doesn't actually get the data from IB, tries to get from cache
 
         :param futures_contract_object: contract, containing instrument metadata suitable for IB
         :return: a single ib contract object
         """
-
+        contract_object_to_use = copy(futures_contract_object)
+        if always_return_single_leg and contract_object_to_use.is_spread_contract():
+            contract_object_to_use.contract_date = futures_contract_object.contract_date[0]
         if getattr(self, "_futures_contract_cache", None) is None:
             self._futures_contract_cache = {}
 
+        if not contract_object_to_use.is_spread_contract():
+            trade_list_suffix = ""
+        else:
+            ## WANT TO TREAT EG -2,2 AND -4,4 AS THE SAME BUT DIFFERENT FROM -2,1 OR -1,2,-1...
+            trade_list_suffix = str(list_of_ints_with_highest_common_factor_positive_first(trade_list_for_multiple_legs))
+
         cache = self._futures_contract_cache
-        key = futures_contract_object.ident()
+        key = contract_object_to_use.ident() + trade_list_suffix
 
-        ibcontract = cache.get(key, missing_contract)
-        if ibcontract is missing_contract:
-            ibcontract = self._get_ib_futures_contract(futures_contract_object)
-            cache[key] = ibcontract
+        ibcontract_with_legs = cache.get(key, missing_contract)
+        if ibcontract_with_legs is missing_contract:
+            ibcontract_with_legs = self._get_ib_futures_contract(contract_object_to_use, trade_list_for_multiple_legs = trade_list_for_multiple_legs)
+            cache[key] = ibcontract_with_legs
 
-        return ibcontract
+        if return_leg_data:
+            return ibcontract_with_legs
+        else:
+            return ibcontract_with_legs.ibcontract
 
 
-    def _get_ib_futures_contract(self, futures_contract_object):
+    def _get_ib_futures_contract(self, contract_object_with_ib_data, trade_list_for_multiple_legs=None):
         """
         Return a complete and unique IB contract that matches futures_contract_object
         This is expensive so not called directly, only by ib_futures_contract which does caching
 
-        :param futures_contract_object: contract, containing instrument metadata suitable for IB
+        :param contract_object_with_ib_data: contract, containing instrument metadata suitable for IB
         :return: a single ib contract object
         """
         # Convert to IB world
-        instrument_object_with_metadata = futures_contract_object.instrument
-        ibcontract = ib_futures_instrument(instrument_object_with_metadata)
+        instrument_object_with_metadata = contract_object_with_ib_data.instrument
 
-        # Register the contract to make logging and error handling cleaner
-        self.add_contract_to_register(ibcontract,
-                                      log_tags = dict(instrument_code = instrument_object_with_metadata.instrument_code,
-                                                      contract_date = futures_contract_object.date))
+        if contract_object_with_ib_data.is_spread_contract():
+            ibcontract, legs = self._get_spread_ib_futures_contract(instrument_object_with_metadata, contract_object_with_ib_data.contract_date,
+                                                          trade_list_for_multiple_legs = trade_list_for_multiple_legs)
+        else:
+            ibcontract = self._get_vanilla_ib_futures_contract(instrument_object_with_metadata, contract_object_with_ib_data.contract_date)
+            legs = []
+
+        ibcontract_with_legs = ibcontractWithLegs(ibcontract, legs=legs)
+
+        return ibcontract_with_legs
+
+    def _get_vanilla_ib_futures_contract(self, instrument_object_with_metadata, contract_date):
+        """
+        Return a complete and unique IB contract that matches contract_object_with_ib_data
+        This is expensive so not called directly, only by ib_futures_contract which does caching
+
+        :param contract_object_with_ib_data: contract, containing instrument metadata suitable for IB
+        :return: a single ib contract object
+        """
 
         # The contract date might be 'yyyymm' or 'yyyymmdd'
-        contract_day_passed = futures_contract_object.contract_date.is_day_defined()
+        ibcontract = ib_futures_instrument(instrument_object_with_metadata)
+
+        contract_day_passed = contract_date.is_day_defined()
         if contract_day_passed:
             ## Already have the expiry
-            contract_date = futures_contract_object.contract_date
+            pass
         else:
             ## Don't have the expiry so lose the days at the end so it's just 'YYYYMM'
-            contract_date = str(futures_contract_object.contract_date)[:6]
+            contract_date = str(contract_date)[:6]
 
         ibcontract.lastTradeDateOrContractMonth = contract_date
 
@@ -334,6 +541,43 @@ class ibClient(brokerClient):
 
         return resolved_contract
 
+    def _get_spread_ib_futures_contract(self, instrument_object_with_metadata, list_of_contract_dates,
+                                        trade_list_for_multiple_legs = [-1,1]):
+        """
+        Return a complete and unique IB contract that matches contract_object_with_ib_data
+        This is expensive so not called directly, only by ib_futures_contract which does caching
+
+        :param contract_object_with_ib_data: contract, containing instrument metadata suitable for IB
+        :return: a single ib contract object
+        """
+        # Convert to IB world
+        ibcontract = ib_futures_instrument(instrument_object_with_metadata)
+        ibcontract.secType = "BAG"
+
+        resolved_legs = [self._get_vanilla_ib_futures_contract(instrument_object_with_metadata,contract_date) \
+                        for contract_date in list_of_contract_dates]
+
+        ratio_list = list_of_ints_with_highest_common_factor_positive_first(trade_list_for_multiple_legs)
+
+        def _get_ib_combo_leg(ratio, resolved_leg):
+
+            leg = ComboLeg()
+            leg.conId = int(resolved_leg.conId)
+            leg.exchange = str(resolved_leg.exchange)
+
+            action, size = resolveBS(ratio)
+
+            leg.ratio = int(size)
+            leg.action = str(action)
+
+            return leg
+
+        ibcontract.comboLegs = [_get_ib_combo_leg(ratio, resolved_leg)
+                                for ratio, resolved_leg in zip(ratio_list, resolved_legs)]
+
+        return ibcontract, resolved_legs
+
+
 
     def ib_resolve_unique_contract(self, ibcontract_pattern, log=None):
         """
@@ -358,6 +602,18 @@ class ibClient(brokerClient):
         resolved_contract = contract_chain[0]
 
         return resolved_contract
+
+    def ib_get_contract_with_conId(self, symbol, conId):
+        ibcontract_pattern = ib_futures_instrument_just_symbol(symbol)
+        contract_chain = self.ib_get_contract_chain(ibcontract_pattern)
+        conId_list = [contract.conId for contract in contract_chain]
+        try:
+            contract_idx = conId_list.index(conId)
+        except ValueError:
+            return missing_contract
+        required_contract = contract_chain[contract_idx]
+
+        return required_contract
 
     def ib_get_contract_chain(self, ibcontract_pattern, log=None):
         """
@@ -487,71 +743,6 @@ def get_barsize_and_duration_from_frequency(bar_freq):
 
     return ib_barsize, ib_duration
 
-def ib_futures_instrument(futures_instrument_object):
-    """
-    Get an IB contract which is NOT specific to a contract date
-    Used for getting expiry chains
-
-    :param futures_instrument_object: instrument with .metadata suitable for IB
-    :return: IBcontract
-    """
-
-    meta_data = futures_instrument_object.meta_data
-
-    ibcontract = Future(meta_data['symbol'], exchange = meta_data['exchange'])
-    if meta_data['ibMultiplier'] is NOT_REQUIRED:
-        pass
-    else:
-        ibcontract.multiplier = int(meta_data['ibMultiplier'])
-    if meta_data['currency'] is NOT_REQUIRED:
-        pass
-    else:
-        ibcontract.currency = meta_data['currency']
-
-    return ibcontract
-
-
-def resolve_multiple_expiries(ibcontract_list, instrument_object_with_metadata):
-    code = instrument_object_with_metadata.instrument_code
-    ignore_weekly = instrument_object_with_metadata.meta_data['ignoreWeekly']
-    if not ignore_weekly:
-        ## Can't be resolved
-        raise Exception("%s has multiple plausible contracts but is not set to ignoreWeekly in IB config file" % code)
-
-    ## It's a contract with weekly expiries (probably VIX)
-    ## Check it's the VIX
-    if not code=="VIX":
-        raise Exception("You have specified weekly expiries, but I don't have logic for %s" % code)
-
-    # Get the symbols
-    contract_symbols = [ibcontract.localSymbol for ibcontract in ibcontract_list]
-    try:
-        are_monthly = [_is_vix_symbol_monthly(symbol) for symbol in contract_symbols]
-    except Exception as exception:
-        raise Exception(exception.args[0])
-
-    if are_monthly.count(monthly):
-        index_of_monthly = are_monthly.index(monthly)
-        resolved_contract = ibcontract_list[index_of_monthly]
-    else:
-        # no matches or multiple matches
-        raise Exception("Can't find a unique monthly expiry")
-
-    return resolved_contract
-
-monthly=object()
-weekly=object()
-
-def _is_vix_symbol_monthly(symbol):
-    if re.match("VX[0-9][0-9][A-Z][0-9]", symbol):
-        # weekly
-        return weekly
-    elif re.match("VX[A-Z][0-9]", symbol):
-        # monthly
-        return monthly
-    else:
-        raise Exception("IB Local Symbol %s not recognised" % symbol)
-
 def avoid_pacing_violation(last_call_datetime, log=logtoscreen("")):
     printed_warning_already = False
     while (datetime.datetime.now() - last_call_datetime).total_seconds() < PACING_INTERVAL_SECONDS:
@@ -574,125 +765,21 @@ def ib_timestamp_to_datetime(timestamp_ib):
 
     return adjusted_ts
 
-def from_ib_positions_to_dict(raw_positions):
-    """
+class ibcontractWithLegs(object):
+    def __init__(self, ibcontract, legs=[]):
+        self.ibcontract = ibcontract
+        self.legs = legs
+    def __repr__(self):
+        return str(self.ibcontract)+" "+str(self.legs)
+class tradeWithContract(object):
+    def __init__(self, ibcontract_with_legs, trade_object):
+        self.ibcontract_with_legs = ibcontract_with_legs
+        self.trade = trade_object
 
-    :param raw_positions: list of positions in form Position(...)
-    :return: dict of positions as dataframes
-    """
-    resolved_positions_dict = dict()
-    position_methods = dict(STK = resolve_ib_stock_position, FUT = resolve_ib_future_position,
-                            CASH = resolve_ib_cash_position)
-    for position in raw_positions:
-        asset_class = position.contract.secType
-        method = position_methods.get(asset_class, None)
-        if method is None:
-            raise Exception("Can't find asset class %s in methods dict" % asset_class)
+    def __repr__(self):
+        return str(self.trade)+" "+str(self.ibcontract_with_legs)
 
-        resolved_position = method(position)
-        asset_class_list = resolved_positions_dict.get(asset_class, [])
-        asset_class_list.append(resolved_position)
-        resolved_positions_dict[asset_class] = asset_class_list
-
-    return resolved_positions_dict
-
-def resolve_ib_stock_position(position):
-    return dict(account = position.account, symbol = position.contract.symbol,
-                multiplier = 1.0, expiry = "",
-                exchange = position.contract.exchange, currency = position.contract.currency,
-                position = position.position)
-
-def resolve_ib_future_position(position):
-    return dict(account = position.account, symbol = position.contract.symbol, expiry = position.contract.lastTradeDateOrContractMonth,
-                multiplier = float(position.contract.multiplier), currency = position.contract.currency,
-                position = position.position)
-
-def resolve_ib_cash_position(position):
-    return dict(account = position.account, symbol = position.contract.localSymbol,
-                expiry = "", multiplier = 1.0,
-                currency = position.contract.currency, position = position.position)
-
-def resolveBS(trade):
-    if trade<0:
-        return 'SELL', abs(trade)
-    return 'BUY', abs(trade)
-
-
-def sign_from_BS(action):
-    if action=="SELL":
-        return -1
-    return 1
-
-
-def extract_trade_info(trade_to_process):
-    order_info = extract_order_info(trade_to_process)
-    contract_info = extract_contract_info(trade_to_process)
-    fill_info = extract_fill_info(trade_to_process)
-
-    algo_msg = " ".join([str(log_entry) for log_entry in trade_to_process.log])
-    total_filled = trade_to_process.filled()
-    active = trade_to_process.isActive()
-
-    tradeInfo = namedtuple("tradeInfo", ['order', 'contract', 'fills','algo_msg', 'total_filled', 'active'])
-    trade_info = tradeInfo(order_info, contract_info, fill_info, algo_msg, total_filled, active)
-
-    return trade_info
-
-def extract_order_info(trade_to_process):
-    order = trade_to_process.order
-
-    account = order.account
-    perm_id = order.permId
-    limit_price = order.lmtPrice
-    order_sign = sign_from_BS(order.action)
-    order_type = resolve_order_type(order.orderType)
-    remain_qty = order.totalQuantity
-
-    orderInfo = namedtuple('orderInfo', ['account',  'perm_id', 'limit_price', 'order_sign', 'type',
-                                         'remain_qty'])
-    order_info = orderInfo(account=account, perm_id=perm_id, limit_price=limit_price,
-                order_sign=order_sign, type = order_type, remain_qty=remain_qty)
-
-    return order_info
-
-def extract_contract_info(trade_to_process):
-    contract = trade_to_process.contract
-    ib_instrument_code = contract.symbol
-    ib_contract_id = contract.lastTradeDateOrContractMonth
-    ib_sectype = contract.secType
-
-    contractInfo = namedtuple("contractInfo", ['ib_instrument_code', 'ib_contract_id', 'ib_sectype'])
-    contract_info = contractInfo(ib_instrument_code=ib_instrument_code, ib_contract_id=ib_contract_id,
-                                 ib_sectype=ib_sectype)
-
-    return contract_info
-
-def extract_fill_info(trade_to_process):
-    all_fills = trade_to_process.fills
-    fill_info = [extract_single_fill(single_fill) for single_fill in all_fills]
-
-    return fill_info
-
-def extract_single_fill(single_fill):
-    commission = single_fill.commissionReport.commission
-    commission_ccy = single_fill.commissionReport.currency
-    cum_qty = single_fill.execution.cumQty
-    price = single_fill.execution.price
-    avg_price = single_fill.execution.avgPrice
-    time = single_fill.execution.time
-    temp_id = single_fill.execution.orderId
-    client_id = single_fill.execution.clientId
-
-    singleFill = namedtuple("singleFill", ['commission','commission_ccy', 'cum_qty', 'price', 'avg_price', 'time',
-                                           'temp_id', 'client_id'])
-
-    single_fill = singleFill(commission, commission_ccy, cum_qty, price, avg_price, time, temp_id, client_id)
-
-    return single_fill
-
-def resolve_order_type(ib_order_type):
-    lookup_dict = dict(MKT='market')
-    my_order_type = lookup_dict.get(ib_order_type, "")
-
-    return my_order_type
-
+class tickerWithBS(object):
+    def __init__(self, ticker, BorS):
+        self.ticker = ticker
+        self.BorS = BorS

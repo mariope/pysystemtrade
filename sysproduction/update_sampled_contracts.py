@@ -38,11 +38,21 @@ def update_sampled_contracts():
     :returns: None
     """
     with dataBlob(log_name="Update-Sampled_Contracts") as data:
+        update_contracts_object = updateSampledContracts(data)
+        update_contracts_object.update_sampled_contracts()
+
+class updateSampledContracts(object):
+    def __init__(self, data):
+        self.data = data
+    def update_sampled_contracts(self):
+        data = self.data
         diag_prices =diagPrices(data)
         list_of_codes_all = diag_prices.get_list_of_instruments_in_multiple_prices()
         for instrument_code in list_of_codes_all:
             new_log = data.log.setup(instrument_code = instrument_code)
             update_active_contracts_for_instrument(instrument_code, data, log=new_log)
+
+        return None
 
 
 def update_active_contracts_for_instrument(instrument_code, data, log=logtoscreen("")):
@@ -108,8 +118,8 @@ def update_contract_database_with_contract_chain( instrument_code, required_cont
     add_missing_contracts_to_database(instrument_code, missing_from_db, data, log=log)
 
     #Is something in the database, but not in required_contract_chain?
-    #Then it's eithier expired or weirdly very far in the future (maybe we changed the roll parameters)
-    #Eithier way, we stop sampling it (if it hasn't expired, will be added in the future)
+    #Then it's either expired or weirdly very far in the future (maybe we changed the roll parameters)
+    #Either way, we stop sampling it (if it hasn't expired, will be added in the future)
     contracts_not_sampling = current_contract_chain.difference(required_contract_chain)
     mark_contracts_as_stopped_sampling(instrument_code, contracts_not_sampling, data, log=log)
 

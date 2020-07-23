@@ -1,12 +1,12 @@
 from syscore.objects import arg_not_supplied
-from syscore.genutils import run_interactive_menu, get_and_convert
+from syscore.genutils import run_interactive_menu, get_and_convert, print_menu_and_get_response
 from sysdata.production.override import override_dict, Override
 
 from sysproduction.data.get_data import dataBlob
-from sysproduction.data.controls import diagOverrides, updateOverrides, dataTradeLimits
+from sysproduction.data.controls import diagOverrides, updateOverrides, dataTradeLimits, diagProcessConfig, dataControlProcess
 from sysproduction.data.prices import get_valid_instrument_code_from_user
-from sysproduction.data.sim_data import get_valid_strategy_name_from_user
-from sysproduction.data.contracts import get_valid_instrument_code_and_contractid_from_user
+from sysproduction.data.strategies import get_valid_strategy_name_from_user, get_list_of_strategies
+
 
 def interactive_controls():
     with dataBlob(log_name = "Interactive-Controls") as data:
@@ -24,8 +24,7 @@ def interactive_controls():
         method_chosen = dict_of_functions[option_chosen]
         method_chosen(data)
 
-top_level_menu_of_options = {0:'Trade limits', 1:'Trade control (override)', 2:'Process control',
-                3:'Process tracking'}
+top_level_menu_of_options = {0:'Trade limits', 1:'Trade control (override)', 2:'Process control and monitoring'}
 
 nested_menu_of_options = {
                     0:{0: 'View trade limits',
@@ -38,14 +37,12 @@ nested_menu_of_options = {
                     1: {10: 'View overrides',
                         11: 'Update / add / remove override for strategy',
                         12: 'Update / add / remove override for instrument',
-                        13: 'Update / add / remove override for contract',
-                        14: 'Update / add / remove override for strategy & instrument'
+                        13: 'Update / add / remove override for strategy & instrument'
                         },
-                    2: {20: 'View process controls',
-                        21: 'Change process controls',
-                        22: 'View process status'},
-                    3: {30: 'View process status'
-                    }}
+                    2: {20: 'View process controls and status',
+                        21: 'Change status of process control (STOP/GO/NO RUN)',
+                        22: 'View process configuration (set in YAML, cannot change here)',
+                        23: 'Mark process as finished'}}
 
 
 
@@ -104,39 +101,30 @@ def view_overrides(data):
     print("\n")
 
 def update_strategy_override(data):
-    diag_overrides = diagOverrides(data)
+    update_overrides = updateOverrides(data)
     strategy_name = get_valid_strategy_name_from_user()
     new_override = get_overide_object_from_user()
     ans = input("Are you sure? (y/other)")
     if ans =="y":
-        diag_overrides.update_override_for_strategy(strategy_name, new_override)
+        update_overrides.update_override_for_strategy(strategy_name, new_override)
 
 
 def update_instrument_override(data):
-    diag_overrides = diagOverrides(data)
+    update_overrides = updateOverrides(data)
     instrument_code = get_valid_instrument_code_from_user(data)
     new_override = get_overide_object_from_user()
     ans = input("Are you sure? (y/other)")
     if ans =="y":
-        diag_overrides.update_override_for_instrument(instrument_code, new_override)
-
-def update_contract_override(data):
-    diag_overrides = diagOverrides(data)
-    instrument_code, contract_id = get_valid_instrument_code_and_contractid_from_user(data)
-    new_override = get_overide_object_from_user()
-    ans = input("Are you sure? (y/other)")
-    if ans =="y":
-        diag_overrides.update_override_for_instrument_and_contractid(instrument_code, contract_id, new_override)
-        print("Won't be updated automatically when the contract expires - you will have to delete")
+        update_overrides.update_override_for_instrument(instrument_code, new_override)
 
 def update_strategy_instrument_override(data):
-    diag_overrides = diagOverrides(data)
+    update_overrides = updateOverrides(data)
     instrument_code = get_valid_instrument_code_from_user(data)
     strategy_name = get_valid_strategy_name_from_user()
     new_override = get_overide_object_from_user()
     ans = input("Are you sure? (y/other)")
     if ans =="y":
-        diag_overrides.update_override_for_strategy_instrument(strategy_name, instrument_code, new_override)
+        update_overrides.update_override_for_strategy_instrument(strategy_name, instrument_code, new_override)
 
 
 def get_overide_object_from_user():
@@ -153,6 +141,62 @@ def get_overide_object_from_user():
         except Exception as e:
             print(e)
 
+def view_process_controls(data):
+    dict_of_controls = get_dict_of_process_controls(data)
+    print("\nControlled processes:\n")
+    for key,value in dict_of_controls.items():
+        print("%s: %s" % (str(key), str(value)))
+    return dict_of_controls
+
+def get_dict_of_process_controls(data):
+    data_process = dataControlProcess(data)
+    dict_of_controls = data_process.get_dict_of_control_processes()
+
+    return dict_of_controls
+
+def change_process_control_status(data):
+    data_process = dataControlProcess(data)
+    process_name = get_process_name(data)
+    status_int = print_menu_and_get_response({1:"Go", 2:"Do not run (don't stop if already running)", 3:"Stop (and don't run if not started)"}, default_option=0, default_str="<CANCEL>")
+    if status_int==1:
+        data_process.change_status_to_go(process_name)
+    if status_int==2:
+        data_process.change_status_to_no_run(process_name)
+    if status_int==3:
+        data_process.change_status_to_stop(process_name)
+
+    return None
+
+def get_process_name(data):
+    process_names = get_dict_of_process_controls(data)
+    menu_of_options = dict(list(enumerate(process_names)))
+    print("Process name?")
+    option = print_menu_and_get_response(menu_of_options, default_option=1)
+    ans = menu_of_options[option]
+    return ans
+
+def view_process_config(data):
+    diag_config = diagProcessConfig(data)
+    process_name = get_process_name(data)
+    result_dict = diag_config.get_config_dict(process_name)
+    for key,value in result_dict.items():
+        print("%s: %s" % (str(key), str(value)))
+    print("\nAbove should be modified in private_config.yaml files")
+
+def view_strategy_config(data):
+    diag_config = diagProcessConfig(data)
+    strategy_name = get_valid_strategy_name_from_user()
+    result_dict = diag_config.get_strategy_dict_for_strategy(strategy_name)
+    for key,value in result_dict.items():
+        print("%s: %s" % (str(key), str(value)))
+    print("\nAbove should be modified in private_config.yaml files")
+
+
+def finish_process(data):
+    print("Will need to use if process aborted without properly closing")
+    process_name = get_process_name(data)
+    data_control = dataControlProcess(data)
+    data_control.finish_process(process_name)
 
 def not_defined(data):
     print("\n\nFunction not yet defined\n\n")
@@ -166,11 +210,10 @@ dict_of_functions = {0: view_trade_limits,
                      10: view_overrides,
                      11: update_strategy_override,
                      12: update_instrument_override,
-                     13: update_contract_override,
-                     14: update_strategy_instrument_override,
+                     13: update_strategy_instrument_override,
 
-                     20: not_defined,
-                     21: not_defined,
-                     22: not_defined,
-                    30: not_defined}
+                     20: view_process_controls,
+                     21: change_process_control_status,
+                     22: view_process_config,
+                     23: finish_process}
 

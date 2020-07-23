@@ -2,6 +2,7 @@ from syscore.dateutils import month_from_contract_letter
 from sysdata.futures.contract_dates_and_expiries import contractDate
 from sysdata.futures.rolls import contractDateWithRollParameters
 from sysdata.futures.instruments import futuresInstrument
+from sysdata.futures.trading_hours import manyTradingStartAndEnd
 
 from sysdata.data import baseData
 from copy import copy
@@ -27,10 +28,18 @@ class futuresContract(object):
         :param contract_date_object: contractDate or contractDateWithRollParameters or str
         """
 
-        if type(instrument_object) is str and type(contract_date_object) is str:
-            # create a simple object
-            self.instrument = futuresInstrument(instrument_object)
-            self.contract_date = contractDate(contract_date_object)
+        if type(instrument_object) is str:
+            if type(contract_date_object) is str:
+                # create a simple object
+                self.instrument = futuresInstrument(instrument_object)
+                self.contract_date = contractDate(contract_date_object)
+            if type(contract_date_object) is list:
+                if len(contract_date_object)==1:
+                    self.instrument = futuresInstrument(instrument_object)
+                    self.contract_date = contractDate(contract_date_object[0])
+                else:
+                    self.instrument = futuresInstrument(instrument_object)
+                    self.contract_date = [contractDate(contract_date) for contract_date in contract_date_object]
 
         else:
             self.instrument = instrument_object
@@ -131,9 +140,19 @@ class futuresContract(object):
     def instrument_code(self):
         return self.instrument.instrument_code
 
+    def is_spread_contract(self):
+        if type(self.contract_date) is list:
+            if len(self.contract_date)>1:
+                return True
+        else:
+            return False
+
     @property
     def date(self):
-        return self.contract_date.contract_date
+        if self.is_spread_contract():
+            return "_".join([str(x) for x in self.contract_date])
+        else:
+            return self.contract_date.contract_date
 
     @property
     def expiry_date(self):
@@ -205,6 +224,7 @@ class futuresContract(object):
         contract_date_object = self.contract_date
 
         return futuresContract(new_instrument_object, contract_date_object)
+
 
 
 
@@ -432,4 +452,37 @@ class futuresContractData(baseData):
     def get_actual_expiry_date_for_contract(self, contract_object):
         raise NotImplementedError(USE_CHILD_CLASS_ERROR)
 
+    def is_instrument_code_and_contract_date_okay_to_trade(self, instrument_code, contract_date):
+        contract_object = futuresContract(instrument_code, contract_date)
+        result = self.is_contract_okay_to_trade(contract_object)
 
+        return result
+
+    def less_than_one_hour_of_trading_leg_for_instrument_code_and_contract_date(self, instrument_code, contract_date):
+        contract_object = futuresContract(instrument_code, contract_date)
+        result = self.less_than_one_hour_of_trading_leg_for_contract(contract_object)
+
+        return result
+
+
+    def is_contract_okay_to_trade(self, contract_object):
+        trading_hours = self.get_trading_hours_for_contract(contract_object)
+        trading_hours_checker = manyTradingStartAndEnd(trading_hours)
+
+        return trading_hours_checker.okay_to_trade_now()
+
+    def less_than_one_hour_of_trading_leg_for_contract(self, contract_object):
+        trading_hours = self.get_trading_hours_for_contract(contract_object)
+        trading_hours_checker = manyTradingStartAndEnd(trading_hours)
+
+        return trading_hours_checker.less_than_one_hour_left()
+
+
+    def get_trading_hours_for_instrument_code_and_contract_date(self, instrument_code, contract_date):
+        contract_object = futuresContract(instrument_code, contract_date)
+        result = self.get_trading_hours_for_contract(contract_object)
+
+        return result
+
+    def get_trading_hours_for_contract(self, contract_object):
+        raise NotImplementedError(USE_CHILD_CLASS_ERROR)

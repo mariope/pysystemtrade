@@ -2,24 +2,19 @@ import numpy as np
 
 from syscore.objects import missing_order, success, failure, locked_order, duplicate_order, no_order_id, no_children, no_parent, missing_contract, missing_data, rolling_cant_trade, ROLL_PSEUDO_STRATEGY, missing_order, order_is_in_status_reject_modification, order_is_in_status_finished, locked_order, order_is_in_status_modified, resolve_function
 
-
-from sysexecution.contract_orders import log_attributes_from_contract_order
-from sysexecution.instrument_orders import log_attributes_from_instrument_order
-
 from syscore.genutils import sign
 from syscore.objects import missing_order, missing_contract, missing_data, rolling_cant_trade
 
 from sysproduction.data.contracts import diagContracts
 from sysproduction.data.positions import diagPositions
 from sysproduction.data.prices import diagPrices
+from sysproduction.data.controls import dataLocks
 
 from sysexecution.contract_orders import contractOrder
 from sysexecution.algos.allocate_algo_to_order import allocate_algo_to_list_of_contract_orders
 from sysexecution.stack_handler.stackHandlerCore import stackHandlerCore
 
 class stackHandlerForSpawning(stackHandlerCore):
-    def process_spawning_stack(self):
-        self.spawn_children_from_new_instrument_orders()
 
     def spawn_children_from_new_instrument_orders(self):
         new_order_ids = self.instrument_stack.list_of_new_orders()
@@ -27,36 +22,27 @@ class stackHandlerForSpawning(stackHandlerCore):
             self.spawn_children_from_instrument_order_id(instrument_order_id)
 
     def spawn_children_from_instrument_order_id(self, instrument_order_id):
+        data_locks = dataLocks(self.data)
         instrument_order = self.instrument_stack.get_order_with_id_from_stack(instrument_order_id)
         if instrument_order is missing_order:
             return failure
 
-        log = log_attributes_from_instrument_order(self.log, instrument_order)
+        log = instrument_order.log_with_attributes(self.log)
+        instrument_locked = data_locks.is_instrument_locked(instrument_order.instrument_code)
+        if instrument_locked:
+            log.msg("Instrument is locked, not spawning order")
+            return failure
 
         list_of_contract_orders = spawn_children_from_instrument_order(self.data, instrument_order)
 
         log.msg("List of contract orders spawned %s" % str(list_of_contract_orders))
 
-        list_of_child_ids = self.contract_stack.put_list_of_orders_on_stack(list_of_contract_orders)
+        result = self.add_children_to_stack_and_child_id_to_parent(self.instrument_stack,
+                                                                  self.contract_stack,
+                                                                  instrument_order,
+                                                                  list_of_contract_orders)
 
-        if list_of_child_ids is failure:
-            log.msg("Failed to create child orders %s from parent order %s" % (str(list_of_contract_orders),
-                                                                                          str(instrument_order)))
-            return failure
-
-
-        for contract_order, child_id in zip(list_of_contract_orders, list_of_child_ids):
-            child_log = log_attributes_from_contract_order(log, contract_order)
-            child_log.msg("Put child order %s on contract_stack with ID %d from parent order %s" % (str(contract_order),
-                                                                                          child_id,
-                                                                                          str(instrument_order)))
-        result = self.instrument_stack.add_children_to_order(instrument_order.order_id, list_of_child_ids)
-        if result is not success:
-            log.msg("Error %s when adding children to instrument order %s" % (str(result), str(instrument_order)))
-            return failure
-
-        return success
-
+        return result
 
 def spawn_children_from_instrument_order(data, instrument_order):
     spawn_function = function_to_process_instrument(instrument_order.instrument_code)
@@ -92,7 +78,7 @@ def single_instrument_child_orders(data, instrument_order):
     """
     # We don't allow zero trades to be spawned
     # Zero trades can enter the instrument stack, where they can potentially modify existing trades
-    if instrument_order.trade ==0:
+    if instrument_order.is_zero_trade():
         return []
 
     # Get required contract(s) depending on roll status
@@ -132,10 +118,11 @@ def get_required_contract_trade_for_instrument(data, instrument_order):
     :return: tuple: list of child orders: each is a tuple: contract str or missing_contract, trade int
     """
     instrument_code = instrument_order.instrument_code
-    trade = instrument_order.trade
-
-    log =  data.log.setup(instrument_code=instrument_code, strategy=instrument_order.strategy_name,
-                          instrument_order_id=instrument_order.order_id)
+    log =  instrument_order.log_with_attributes(data.log)
+    trade = instrument_order.trade.as_int()
+    if trade is missing_order:
+        log.critical("Instrument order can't be a spread order")
+        return missing_contract
 
     diag_contracts = diagContracts(data)
     current_contract = diag_contracts.get_priced_contract_id(instrument_code)

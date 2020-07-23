@@ -1,6 +1,6 @@
 import datetime
 
-from syscore.objects import arg_not_supplied, missing_data, success, failure
+from syscore.objects import arg_not_supplied, missing_data, success, failure, missing_order
 
 from sysproduction.data.contracts import missing_contract
 from sysproduction.data.get_data import dataBlob
@@ -105,6 +105,16 @@ class updatePositions(object):
     def set_roll_state(self, instrument_code, roll_state_required):
         return self.data.db_roll_state.set_roll_state(instrument_code, roll_state_required)
 
+    def update_positions_with_instrument_and_contract_orders(self, instrument_order, contract_order_list):
+        # Update strategy position table
+        self.update_strategy_position_table_with_instrument_order(instrument_order)
+
+        # Update contract position table
+        for contract_order in contract_order_list:
+            self.update_contract_position_table_with_contract_order(contract_order)
+
+        return success
+
     def update_strategy_position_table_with_instrument_order(self, instrument_order):
         """
         Alter the strategy position table according to instrument order fill value
@@ -117,8 +127,14 @@ class updatePositions(object):
         instrument_code = instrument_order.instrument_code
         current_position_object = self.data.db_strategy_position.\
             get_current_position_for_strategy_and_instrument(strategy_name, instrument_code)
-        trade_done = instrument_order.fill
+        trade_done = instrument_order.fill.as_int()
+        if trade_done is missing_order:
+            self.log.critical("Instrument orders can't be spread orders!")
+            return  failure
+
         time_date = instrument_order.fill_datetime
+        if time_date is None:
+            time_date  = datetime.datetime.now()
         if current_position_object is missing_data:
             current_position = 0
         else:
@@ -148,6 +164,8 @@ class updatePositions(object):
         contract_id_list = contract_order.contract_id
         fill_list = contract_order.fill
         time_date = contract_order.fill_datetime
+        if time_date is None:
+            time_date  = datetime.datetime.now()
 
         for trade_done, contract_id in zip(fill_list, contract_id_list):
             current_position_object = self.data.db_contract_position.\

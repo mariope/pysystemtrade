@@ -16,28 +16,40 @@ def update_total_capital():
 
     Get the total account value from IB, and calculate the p&l since we last ran
 
-    This calculation is done using a user specified handler, which can deal with eg multiple accounts if required
-
     Needs to know about any withdrawals.
 
     Does spike checking: large changes in account value are checked before writing
 
     If your strategy has very high risk you may wish to do this more frequently than daily
 
+    This is incorporate into the 'run' process, run_capital_update
+
     :return: Nothing
     """
     with dataBlob(log_name="Update-Total-Capital") as data:
+        total_capital= totalCapitalUpdate(data)
+        total_capital.update_total_capital()
 
+    return success
+
+
+class totalCapitalUpdate(object):
+    def __init__(self, data):
+        self.data = data
+
+    def update_total_capital(self):
+        data = self.data
         capital_data = dataCapital(data)
+
         log = data.log
 
-        ## This assumes that each account only reports eithier in one currency or for each currency, i.e. no double counting
+        ## This assumes that each account only reports either in one currency or for each currency, i.e. no double counting
         total_account_value_in_base_currency = capital_data.get_ib_total_capital_value()
         log.msg("Broker account value is %f" % total_account_value_in_base_currency)
 
         # Update total capital
         try:
-            new_capital = capital_data.total_capital_calculator.\
+            new_capital = capital_data.\
                 get_total_capital_with_new_broker_account_value(total_account_value_in_base_currency)
         except Exception as e:
             ## Problem, most likely spike
@@ -45,6 +57,3 @@ def update_total_capital():
             return failure
 
         log.msg("New capital is %f" % new_capital)
-
-
-    return success

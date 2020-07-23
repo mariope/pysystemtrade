@@ -2,11 +2,12 @@
 Utilities I can't put anywhere else...
 """
 
-from math import copysign
+from math import copysign, gcd
 from copy import copy
 import sys
 import numpy as np
 import datetime
+import functools
 
 
 class not_required_flag(object):
@@ -160,7 +161,7 @@ def value_or_npnan(x, return_value = None):
         ## Not something that can be compared to a nan
         pass
 
-    # Eithier wrong type, or not a nan
+    # Either wrong type, or not a nan
     return x
 
 def get_safe_from_dict(some_dict, some_arg_name, some_default):
@@ -242,36 +243,20 @@ class progressBar(object):
     def finished(self):
         sys.stdout.write("\n")
 
-class timerClass(object):
+class quickTimer(object):
+    def __init__(self, seconds = 60):
+        self._started = datetime.datetime.now()
+        self._time_limit = seconds
+
     @property
-    def frequency_minutes(self):
-        return 60.0
+    def unfinished(self):
+     return not self.finished
 
-    def when_last_run(self):
-        when_last_run = getattr(self, "_last_run", None)
-        if when_last_run is None:
-            when_last_run = datetime.datetime(1970,1,1)
-            self._last_run = when_last_run
-
-        return when_last_run
-
-    def set_last_run(self):
-        self._last_run = datetime.datetime.now()
-
-        return None
-
-    def minutes_since_last_run(self):
-        when_last_run = self.when_last_run()
+    @property
+    def finished(self):
         time_now = datetime.datetime.now()
-        delta = time_now - when_last_run
-        delta_minutes = delta.total_seconds()/60.0
-
-        return delta_minutes
-
-    def check_if_ready_for_another_run(self):
-        time_since_run = self.minutes_since_last_run()
-        minutes_between_runs = self.frequency_minutes
-        if time_since_run > minutes_between_runs:
+        elapsed = time_now - self._started
+        if elapsed.seconds>self._time_limit:
             return True
         else:
             return False
@@ -391,6 +376,27 @@ def print_menu_and_get_response(menu_of_options, default_option = None, default_
 
     return ans
 
+
+def transfer_object_attributes(named_tuple_object, original_object):
+    kwargs = dict([(field_name, getattr(original_object, field_name)) \
+                   for field_name in named_tuple_object._fields])
+    new_object = named_tuple_object(**kwargs)
+
+    return new_object
+
+def highest_common_factor_for_list(list_of_ints):
+    return functools.reduce(gcd, list_of_ints)
+
+def divide_list_of_ints_by_highest_common_factor(list_of_ints):
+    gcd_value = highest_common_factor_for_list(list_of_ints)
+    new_list = [int(float(x)/gcd_value) for x in list_of_ints]
+    return new_list
+
+def list_of_ints_with_highest_common_factor_positive_first(list_of_ints):
+    new_list = divide_list_of_ints_by_highest_common_factor(list_of_ints)
+    multiply_sign = sign(new_list[0])
+    new_list = [x*multiply_sign for x in new_list]
+    return new_list
 
 if __name__ == '__main__':
     import doctest

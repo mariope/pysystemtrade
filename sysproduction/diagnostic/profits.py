@@ -8,7 +8,7 @@ from sysproduction.data.capital import dataCapital
 
 from sysproduction.data.currency_data import currencyData
 from sysproduction.data.prices import diagPrices
-from sysproduction.data.trades import diagTrades
+from sysproduction.data.orders import dataOrders
 from sysproduction.data.positions import diagPositions
 from sysproduction.data.instruments import diagInstruments
 
@@ -63,16 +63,14 @@ def get_pandl_report_data(data, calendar_days_back=7):
 
 def get_total_capital_series(data):
     data_capital_object = dataCapital(data)
-    all_capital_data = data_capital_object.total_capital_calculator.get_all_capital_calcs()
 
-    return all_capital_data.Max
+    return data_capital_object.get_series_of_maximum_capital()
 
 def get_daily_perc_pandl(data):
     data_capital_object = dataCapital(data)
-    all_capital_data = data_capital_object.total_capital_calculator.get_all_capital_calcs()
 
     ## This is for 'non compounding' p&l
-    total_pandl_series = all_capital_data.Accumulated
+    total_pandl_series = data_capital_object.get_series_of_accumulated_capital()
     daily_pandl_series = total_pandl_series.ffill().diff()
 
     all_capital = get_total_capital_series(data)
@@ -134,7 +132,6 @@ def get_period_perc_pandl_for_instrument_all_strategies_in_date_range(
 
     return pandl_series.sum()
 
-# OAT BOBL BTP PLAT MXP
 
 def get_df_of_perc_pandl_series_for_instrument_all_strategies_across_contracts_in_date_range(
         data, instrument_code, start_date, end_date):
@@ -209,9 +206,22 @@ def get_pandl_series_in_points_for_contract(data, instrument_code, contract_id):
     price_series = get_price_series_for_contract(data, instrument_code, contract_id)
     trade_df = get_trade_df_for_contract(data, instrument_code, contract_id)
 
+    trade_df = unique_trades_df(trade_df)
+
     returns = pandl_points(price_series, trade_df, pos_series)
 
     return returns
+
+def unique_trades_df(trade_df):
+    cash_flow = trade_df.qty * trade_df.price
+    trade_df['cash_flow'] = cash_flow
+    new_df = trade_df.groupby(trade_df.index).sum()
+    # qty and cash_flow will be correct, price won't be
+    new_price = new_df.cash_flow / new_df.qty
+    new_df['price'] = new_price
+    new_df = new_df.drop('cash_flow', axis=1)
+
+    return new_df
 
 def pandl_points(price_series,
                     trade_df,
@@ -244,6 +254,7 @@ def pandl_points(price_series,
     prices_to_use = prices_to_use.price
 
     price_returns = prices_to_use.ffill().diff()
+    pos_series = pos_series.groupby(pos_series.index).last()
     pos_series = pos_series.reindex(price_returns.index, method="ffill")
 
     returns = pos_series.shift(
@@ -260,8 +271,8 @@ def get_price_series_for_contract(data, instrument_code, contract_id):
     return price_series
 
 def get_trade_df_for_contract(data, instrument_code, contract_id):
-    diag_trades = diagTrades(data)
-    list_of_trades = diag_trades.get_fills_history_for_instrument_and_contract_id(instrument_code, contract_id)
+    data_orders = dataOrders(data)
+    list_of_trades = data_orders.get_fills_history_for_instrument_and_contract_id(instrument_code, contract_id)
     list_of_trades_as_pd_df = list_of_trades.as_pd_df()
 
     return list_of_trades_as_pd_df

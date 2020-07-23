@@ -1,13 +1,11 @@
 
 import pandas as pd
 
-from syscore.objects import  resolve_function, success, failure
+from syscore.objects import  resolve_function, success, failure, arg_not_supplied
 from syscore.objects import header, table, body_text
 
-from sysdata.mongodb.mongo_connection import mongoDb
 from sysproduction.data.get_data import dataBlob
 
-from syslogdiag.log import logToMongod as logger
 from syslogdiag.emailing import send_mail_msg
 
 
@@ -15,22 +13,21 @@ pd.set_option('display.width', 1000)
 pd.set_option('display.max_columns', 1000)
 pd.set_option('display.max_rows', 1000)
 
-
-
-def run_report(report_config, **kwargs):
+def run_report(report_config, data= arg_not_supplied ):
 
     """
 
     :param report_config:
     :return:
     """
-    with dataBlob(log_name = "Reporting %s" % report_config.title) as data:
+    if data is arg_not_supplied:
+        data = dataBlob(log_name = "Reporting %s" % report_config.title)
 
-        report_result = run_report_with_data_blob(report_config, data, **kwargs)
+    report_result = run_report_with_data_blob(report_config, data)
 
-        return report_result
+    return report_result
 
-def run_report_with_data_blob(report_config, data, **kwargs):
+def run_report_with_data_blob(report_config, data):
 
     """
 
@@ -38,10 +35,13 @@ def run_report_with_data_blob(report_config, data, **kwargs):
     :return:
     """
 
+    data.log.msg("Running report %s" % str(report_config))
     report_function = resolve_function(report_config.function)
-    report_result = success
+    report_kwargs = report_config.kwargs
+
     try:
-        report_results = report_function(data, **kwargs)
+        report_results = report_function(data, **report_kwargs)
+        report_result = success
     except Exception as e:
         report_results = [header("Report %s failed to process with error %s" % (report_config.title, e))]
         report_result = failure
@@ -51,7 +51,7 @@ def run_report_with_data_blob(report_config, data, **kwargs):
         parsed_report = "Report failed to parse %s with error %s\n" % (report_config.title, str(e))
         report_result = failure
 
-    # We eithier print or email
+    # We either print or email
     if report_config.output is "console":
         print(parsed_report)
     elif report_config.output is "email":

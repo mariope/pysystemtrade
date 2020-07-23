@@ -1,9 +1,9 @@
 import datetime
 
 from sysexecution.order_stack import orderStackData
-from sysexecution.base_orders import Order, tradeableObject, no_order_id, no_children, no_parent, MODIFICATION_STATUS_NO_MODIFICATION
+from sysexecution.base_orders import Order, tradeableObject, resolve_trade_fill_fillprice, no_order_id, no_children, no_parent
 from syscore.genutils import  none_to_object, object_to_none
-from syscore.objects import missing_order, success, zero_order, duplicate_order
+from syscore.objects import missing_order, success, zero_order
 
 possible_order_types = ['best', 'market', 'limit', 'Zero-roll-order']
 
@@ -33,9 +33,9 @@ class instrumentTradeableObject(tradeableObject):
 
 class instrumentOrder(Order):
 
-    def __init__(self, *args, fill=0,
+    def __init__(self, *args, fill=None,
                  locked=False, order_id=no_order_id,
-                 modification_status = MODIFICATION_STATUS_NO_MODIFICATION,
+                 modification_status = None,
                  modification_quantity = None, parent=no_parent,
                  children=no_children, active=True,
                  order_type="best", limit_price = None, limit_contract = None,
@@ -46,14 +46,14 @@ class instrumentOrder(Order):
                  manual_trade =False, roll_order = False):
         """
 
-        :param args: Eithier a single argument 'strategy/instrument' str, or strategy, instrument; followed by trade
+        :param args: Either a single argument 'strategy/instrument' str, or strategy, instrument; followed by trade
         i.e. instrumentOrder(strategy, instrument, trade,  **kwargs) or 'strategy/instrument', trade, type, **kwargs)
 
         :param fill: fill done so far, int
         :param locked: if locked an order can't be modified, bool
         :param order_id: ID given to orders once in the stack, do not use when creating order
-        :param modification_status: whether the order is being modified, str
-        :param modification_quantity: The new quantity trade we want to do once modified, int
+        :param modification_status: NOT USED
+        :param modification_quantity: NOT USED
         :param parent: int, order ID of parent order in upward stack
         :param children: list of int, order IDs of child orders in downward stack
         :param active: bool, inactive orders have been filled or cancelled
@@ -74,7 +74,7 @@ class instrumentOrder(Order):
         """
         
         :param trade: float
-        :param args: Eithier 2: strategy, instrument; or 1: instrumentTradeableObject
+        :param args: Either 2: strategy, instrument; or 1: instrumentTradeableObject
         :param type: str
         """
         if len(args)==2:
@@ -89,10 +89,12 @@ class instrumentOrder(Order):
         if generated_datetime is None:
             generated_datetime = datetime.datetime.now()
 
-        self._trade = trade
-        self._fill = fill
+        resolved_trade, resolved_fill, resolved_filled_price = resolve_trade_fill_fillprice(trade, fill, filled_price)
+
+        self._trade = resolved_trade
+        self._fill = resolved_fill
+        self._filled_price = resolved_filled_price
         self._fill_datetime = fill_datetime
-        self._filled_price = filled_price
         self._locked = locked
         self._order_id = order_id
         self._modification_status = modification_status
@@ -112,7 +114,7 @@ class instrumentOrder(Order):
     def __repr__(self):
         my_repr = super().__repr__()
         if self.filled_price is not None and self.fill_datetime is not None:
-            my_repr = my_repr + "Fill %.2f on %s" % (self.filled_price, self.fill_datetime)
+            my_repr = my_repr + "Fill %s on %s" % (str(self.filled_price), self.fill_datetime)
         my_repr = my_repr+" %s" % str(self._order_info)
 
         return my_repr
@@ -213,74 +215,99 @@ class instrumentOrder(Order):
     def roll_order(self):
         return self._order_info['roll_order']
 
+    def log_with_attributes(self, log):
+        """
+        Returns a new log object with instrument_order attributes added
+
+        :param log: logger
+        :return: log
+        """
+        new_log = log.setup(
+                  strategy_name=self.strategy_name,
+                  instrument_code=self.instrument_code,
+                  instrument_order_id=object_to_none(self.order_id, no_order_id))
+
+        return new_log
 
 class instrumentOrderStackData(orderStackData):
     def __repr__(self):
         return "Instrument order stack: %s" % str(self._stack)
 
-    def put_order_on_stack(self, new_order, modify_existing_order = False, allow_zero_orders=False):
+    def put_manual_order_on_stack(self, new_order):
+        """
+        Puts an order on the stack ignoring the usual checks
+
+        :param new_order:
+        :return: order_id or failure object
+        """
+
+        order_id_or_error = self._put_order_on_stack_and_get_order_id(new_order)
+
+        return order_id_or_error
+
+    def does_strategy_and_instrument_already_have_order_on_stack(self, strategy_name, instrument_code):
+        pseudo_order = instrumentOrder(strategy_name, instrument_code, 0)
+        existing_orders = self._get_order_with_same_tradeable_object_on_stack(pseudo_order)
+        if existing_orders is missing_order:
+            return False
+        return True
+
+    def put_order_on_stack(self, new_order, allow_zero_orders=False):
         """
         Put an order on the stack, or at least try to:
-        - if no existing order, add
-        - if an existing order exists:
-            - and locked, don't allow
-            - if unlocked:
-                 - order is identical, do nothing
-                 - order is not identical, update
+        - if no existing order for this instrument/strategy, add
+        - if an existing order for this instrument/strategy, put an adjusting order on
 
         :param new_order: Order
         :return: order_id or failure condition: duplicate_order, failure
         """
+
+
+        existing_order_id_list = self._get_order_with_same_tradeable_object_on_stack(new_order)
+        if existing_order_id_list is missing_order:
+            result = self._put_new_order_on_stack_when_no_existing_order(new_order,
+                                                                         allow_zero_orders=allow_zero_orders)
+        else:
+            result = self._put_adjusting_order_on_stack(new_order, existing_order_id_list,
+                                                        allow_zero_orders=allow_zero_orders)
+        return result
+
+    def _put_new_order_on_stack_when_no_existing_order(self, new_order, allow_zero_orders=False):
+        log = new_order.log_with_attributes(self.log)
+
         if new_order.is_zero_trade() and not allow_zero_orders:
+            log.msg("Zero orders not allowed")
             return zero_order
 
-        log = log_attributes_from_instrument_order(self.log, new_order)
+        # no current order for this instrument/strategy
+        log.msg("New order %s putting on %s" % (str(new_order), self.__repr__()))
+        order_id_or_error = self._put_order_on_stack_and_get_order_id(new_order)
+        return order_id_or_error
 
-        existing_order = self._get_order_with_same_tradeable_object_on_stack(new_order)
-        if existing_order is duplicate_order:
-            # Do nothing, pointless
-            log.msg("Order %s already on %s" % (str(new_order), self.__repr__()))
-            return duplicate_order
+    def _put_adjusting_order_on_stack(self, new_order, existing_order_id_list, allow_zero_orders=False):
+        """
+        Considering the order already on the stack place an additional adjusting order
 
-        if existing_order is missing_order:
-            log.msg("New order %s putting on %s" % (str(new_order), self.__repr__()))
-            order_id_or_error = self._put_order_on_stack_and_get_order_id(new_order)
-            return order_id_or_error
+        :param new_order:
+        :return:
+        """
+        log = new_order.log_with_attributes(self.log)
 
-        existing_order_id = existing_order.order_id
-        if not modify_existing_order:
-            log.msg("Order %s matches existing order_id %d on %s: " %
-                    (str(new_order), existing_order_id, self.__repr__()))
-            return duplicate_order
+        existing_orders = [self.get_order_with_id_from_stack(order_id) for order_id in existing_order_id_list]
+        existing_trades = [existing_order.trade for existing_order in existing_orders]
+        net_existing_trades = sum(existing_trades)
+        new_trade = new_order.trade
 
-        # Existing order needs modifying
-        log.msg("Order %s matches existing order_id %d on %s, trying to modify" %
-                (str(new_order), existing_order_id, self.__repr__()))
+        # can change sign
+        residual_trade = new_trade - net_existing_trades
+        adjusted_order = new_order.replace_trade_only_use_for_unsubmitted_trades(residual_trade)
 
-        result = self.modify_order_on_stack(existing_order_id, new_order.trade)
+        if adjusted_order.is_zero_trade() and not allow_zero_orders:
+            ## Trade we want is already in the system
+            return zero_order
 
-        if result is success:
-            return existing_order_id
-        else:
-            return result
+        log.msg("Already have orders %s wanted %s so putting on order for %s (%s)" % (str(existing_trades), str(new_trade), str(residual_trade), str(adjusted_order)))
+        order_id_or_error = self._put_order_on_stack_and_get_order_id(adjusted_order)
 
-    def view_order_for_strategy_and_instrument(self, strategy_name, instrument_code):
-        tradeable_object = instrumentTradeableObject(strategy_name, instrument_code)
-        key = tradeable_object.key
+        return order_id_or_error
 
-        return self.get_order_with_key_from_stack(key)
-
-def log_attributes_from_instrument_order(log, instrument_order):
-    """
-    Returns a new log object with instrument_order attributes added
-
-    :param log: logger
-    :param instrument_order:
-    :return: log
-    """
-    new_log = log.setup(
-              strategy_name=instrument_order.strategy_name,
-              instrument_code=instrument_order.instrument_code,
-              instrument_order_id=object_to_none(instrument_order.order_id, no_order_id))
-
-    return new_log

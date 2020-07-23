@@ -1,6 +1,8 @@
 ### Get all the data we need to run production code
 ### Stick in a standard 'blob', so the names are common
 
+from copy import  copy
+
 from sysbrokers.IB.ibFuturesContractPriceData import ibFuturesContractPriceData
 from sysbrokers.IB.ibSpotFXData import ibFxPricesData
 from sysbrokers.IB.ibConnection import connectionIB
@@ -20,7 +22,14 @@ from sysdata.csv.csv_futures_contract_prices import csvFuturesContractPriceData
 from sysdata.csv.csv_adjusted_prices import csvFuturesAdjustedPricesData
 from sysdata.csv.csv_multiple_prices import csvFuturesMultiplePricesData
 from sysdata.csv.csv_spot_fx import csvFxPricesData
-
+from sysdata.csv.csv_contract_position_data import csvContractPositionData
+from sysdata.csv.csv_strategy_position_data import csvStrategyPositionData
+from sysdata.csv.csv_historic_orders import csvBrokerHistoricOrdersData, csvContractHistoricOrdersData, csvStrategyHistoricOrdersData
+from sysdata.csv.csv_capital_data import csvCapitalData
+from sysdata.csv.csv_optimal_position import csvOptimalPositionData
+from sysdata.csv.csv_instrument_config import csvFuturesInstrumentData
+from sysdata.csv.csv_roll_state_storage import csvRollStateData
+from sysdata.csv.csv_futures_contracts import csvFuturesContractData
 
 from sysdata.mongodb.mongo_futures_instruments import mongoFuturesInstrumentData
 from sysdata.mongodb.mongo_futures_contracts import mongoFuturesContractData
@@ -34,6 +43,8 @@ from sysdata.mongodb.mongo_order_stack import mongoInstrumentOrderStackData, mon
 from sysdata.mongodb.mongo_historic_orders import mongoStrategyHistoricOrdersData, mongoContractHistoricOrdersData, mongoBrokerHistoricOrdersData
 from sysdata.mongodb.mongo_override import mongoOverrideData
 from sysdata.mongodb.mongo_trade_limits import mongoTradeLimitData
+from sysdata.mongodb.mongo_lock_data import mongoLockData
+from sysdata.mongodb.mongo_process_control import mongoControlProcessData
 
 from sysdata.mongodb.mongo_connection import mongoDb
 
@@ -98,9 +109,11 @@ class dataBlob(object):
 
         if arg_string is arg_not_supplied:
             # can set up dynamically later
-            return None
+            pass
+        else:
+            self.add_class_list(arg_string)
 
-        self.add_class_list(arg_string)
+        self._original_data = copy(self)
 
     def __repr__(self):
         return "dataBlob with elements: %s" % ",".join(self.attr_list)
@@ -112,11 +125,17 @@ class dataBlob(object):
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
+        self.close()
+
+    def close(self):
         if self._ib_conn is not arg_not_supplied:
             self.ib_conn.close_connection()
 
         if self._mongo_db is not arg_not_supplied:
             self.mongo_db.close()
+
+
+
 
     @property
     def ib_conn(self):
@@ -145,6 +164,17 @@ class dataBlob(object):
             self._log = log
 
         return log
+
+    @property
+    def log_name(self):
+        return self.log.attributes['type']
+
+    def setup_clone(self, **kwargs):
+        new_data = self._original_data
+        new_data._log = new_data.log.setup(**kwargs)
+        new_data._original_data = self._original_data
+
+        return new_data
 
     @property
     def csv_data_paths(self):

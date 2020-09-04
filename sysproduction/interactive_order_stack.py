@@ -66,8 +66,9 @@ nested_menu_of_options = {
                    11: 'Create force roll contract orders',
                     12: 'Create (and try to execute...) IB broker orders',
                     13: 'Balance trade: Create a series of trades and immediately fill them (not actually executed)',
-                    14: 'Manual trade: Create a series of trades to be executed',
-                    15: 'Cash FX trade'},
+                    14: 'Balance instrument trade: Create a trade just at the strategy level and fill (not actually executed)',
+                    15: 'Manual trade: Create a series of trades to be executed',
+                    16: 'Cash FX trade'},
                     2: {
                    20: 'Manually fill broker or contract order',
                     21: 'Get broker fills from IB',
@@ -120,11 +121,11 @@ def view_generic_stack(stack):
 def view_broker_order_list(data):
     data_broker = dataBroker(data)
     broker_orders = data_broker.get_list_of_orders()
-    print("Orders received from broker API")
+    print("\n\nOrders received from broker API\n")
     for order in broker_orders:
         print(order)
-    print("Stored (orders made in this session):")
-    broker_orders = data_broker.get_list_of_placed_orders()
+    print("\n\nStored (orders made in this session):\n")
+    broker_orders = data_broker.get_list_of_stored_orders()
     for order in broker_orders:
         print(order)
 
@@ -181,6 +182,31 @@ def create_balance_trade(data):
     stack_handler = stackHandlerCreateBalanceTrades(data)
 
     stack_handler.create_balance_trade(broker_order)
+
+def create_instrument_balance_trade(data):
+    data_broker = dataBroker(data)
+    default_account = data_broker.get_broker_account()
+
+    print("Use to fix breaks between instrument strategy and contract level positions")
+    strategy_name = get_valid_strategy_name_from_user()
+    instrument_code = get_valid_instrument_code_from_user(data)
+    fill_qty = get_and_convert("Quantity ", type_expected=int, allow_default=False)
+    filled_price = get_and_convert("Filled price", type_expected=float, allow_default=False)
+    fill_datetime  =get_datetime_input("Fill datetime", allow_default=True)
+
+    instrument_order = instrumentOrder(strategy_name, instrument_code, fill_qty, fill = fill_qty,
+                 order_type="balance_trade",
+                 filled_price = filled_price, fill_datetime = fill_datetime)
+
+    print(instrument_order)
+    ans = input("Are you sure? (Y/other)")
+    if ans !="Y":
+        return None
+
+    stack_handler = stackHandlerCreateBalanceTrades(data)
+
+    stack_handler.create_balance_instrument_trade(instrument_order)
+
 
 def create_manual_trade(data):
 
@@ -381,16 +407,16 @@ def pass_fills_upwards_from_broker(data):
     stack_handler = stackHandler(data)
 
     print("This will process any fills applied to broker orders and pass them up to contract orders")
-    view_broker_stack(data)
+    view_contract_stack(data)
 
-    broker_order_id = get_and_convert("Which order ID?", default_value="ALL", default_str="for all", type_expected=int)
+    contract_order_id = get_and_convert("Which order ID?", default_value="ALL", default_str="for all", type_expected=int)
     ans = input("Are you sure? (Y/other)")
     if ans !="Y":
         return None
-    if broker_order_id=="ALL":
+    if contract_order_id=="ALL":
         stack_handler.pass_fills_from_broker_up_to_contract()
     else:
-        stack_handler.apply_broker_fill_to_contract_order(broker_order_id)
+        stack_handler.apply_broker_fill_to_contract_order(contract_order_id)
 
     print("If stack process not running, your next job will be to pass fills from contract to instrument")
 
@@ -536,16 +562,16 @@ def view_positions(data):
     ans2 = diag_positions.get_all_current_contract_positions()
     ans3 = data_broker.get_all_current_contract_positions()
     print("Strategy positions")
-    print(ans1)
+    print(ans1.as_pd_df().sort_values("instrument_code"))
     print("\n Contract level positions")
-    print(ans2)
+    print(ans2.as_pd_df().sort_values(["instrument_code", "contract_date"]))
     breaks = diag_positions.get_list_of_breaks_between_contract_and_strategy_positions()
     if len(breaks)>0:
         print("\nBREAKS between strategy and contract positions: %s\n" % str(breaks))
     else:
         print("(No breaks positions consistent)")
     print("\n Broker positions")
-    print(ans3)
+    print(ans3.as_pd_df().sort_values(["instrument_code", "contract_date"]))
     breaks = data_broker.get_list_of_breaks_between_broker_and_db_contract_positions()
     if len(breaks)>0:
         print("\nBREAKS between broker and DB stored contract positions: %s\n" % str(breaks))
@@ -614,8 +640,9 @@ dict_of_functions = {0: order_view,
                      11: generate_force_roll_orders,
                      12: generate_ib_orders,
                      13: create_balance_trade,
-                     14: create_manual_trade,
-                     15: create_fx_trade,
+                     14: create_instrument_balance_trade,
+                     15: create_manual_trade,
+                     16: create_fx_trade,
 
                      20: generate_generic_manual_fill,
                      21: get_fills_from_broker,

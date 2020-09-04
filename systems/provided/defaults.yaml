@@ -39,6 +39,7 @@ process_configuration_methods:
   run_capital_update:
     update_total_capital:
       frequency: 120
+      max_executions: 10
     strategy_allocation:
       max_executions: 1
   run_daily_prices_updates:
@@ -121,7 +122,7 @@ strategy_capital_allocation:
     example: 100.0
 #
 ## Where do we save backtests
-backtest_store_directory: 'private'
+backtest_store_directory: 'backtests'
 #
 # And backups
 csv_backup_directory: 'data.backups_csv'

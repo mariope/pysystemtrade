@@ -6,9 +6,14 @@ This 'core' is inherited by all the other classes and just initialises, plus doe
 """
 from syscore.objects import arg_not_supplied, failure, success, duplicate_order, no_children
 
+from sysexecution.base_orders import listOfFillPrice, listOfFillDatetime
+
 from sysproduction.data.orders import dataOrders
 from sysproduction.data.get_data import dataBlob
 from sysproduction.data.controls import dataTradeLimits
+
+from sysproduction.data.positions import updatePositions
+
 
 class stackHandlerCore(object):
     def __init__(self, data=arg_not_supplied):
@@ -187,3 +192,57 @@ class stackHandlerCore(object):
 
 
         data_trade_limits.remove_trade(strategy_name, instrument_code, unfilled_qty)
+
+    def apply_broker_fill_to_contract_order(self, contract_order_id):
+        contract_order = self.contract_stack.get_order_with_id_from_stack(contract_order_id)
+
+        children = contract_order.children
+        if children is no_children:
+            # no children created yet, definitely no fills
+            return None
+
+        broker_order_list = self.broker_stack.get_list_of_orders_from_order_id_list(children)
+
+        ## We apply: total quantity, average price, highest datetime
+
+        list_of_filled_qty = [order.fill for order in broker_order_list]
+
+        zero_fills = [fill.equals_zero() for fill in list_of_filled_qty]
+        if all(zero_fills):
+            ## nothing to do here
+            return None
+
+        list_of_filled_price = listOfFillPrice([order.filled_price for order in broker_order_list])
+        list_of_filled_datetime = listOfFillDatetime([order.fill_datetime for order in broker_order_list])
+
+        final_fill_datetime = list_of_filled_datetime.final_fill_datetime()
+        total_filled_qty = sum(list_of_filled_qty)
+        average_fill_price = list_of_filled_price.average_fill_price()
+
+        result = self.contract_stack.\
+            change_fill_quantity_for_order(contract_order.order_id, total_filled_qty, filled_price=average_fill_price,
+                                           fill_datetime=final_fill_datetime)
+
+        # if fill has changed then update positions
+        # we do this here, because we can get here eithier from fills process or after an execution
+        self.apply_position_change_to_contracts(contract_order, total_filled_qty)
+
+        return result
+
+    def apply_position_change_to_contracts(self, contract_order, total_filled_qty, apply_entire_trade = False):
+        current_fills = contract_order.fill
+
+        if apply_entire_trade:
+            new_fills = current_fills
+        else:
+            if total_filled_qty==current_fills:
+                ## no change needed here
+                return success
+
+            new_fills = total_filled_qty - current_fills
+
+        position_updater = updatePositions(self.data)
+        result = position_updater.update_contract_position_table_with_contract_order(contract_order, new_fills)
+
+        return result
+

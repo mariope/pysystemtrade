@@ -3,6 +3,7 @@ import datetime
 import numpy as np
 from syscore.genutils import are_dicts_equal, none_to_object, object_to_none, sign
 from syscore.objects import  success,  no_order_id, no_children, no_parent, missing_order
+from syscore.genutils import sign
 
 
 class tradeableObject(object):
@@ -62,6 +63,8 @@ class tradeQuantity(object):
     def equals_zero(self):
         return all([x == 0 for x in self.qty])
 
+    def sign_equal(self, other):
+        return all([sign(x) == sign(y) for x, y in zip(self.qty, other.qty)])
 
     def __len__(self):
         return len(self.qty)
@@ -224,7 +227,22 @@ class fillPrice(object):
     def __len__(self):
         return len(self.price)
 
+class listOfFillPrice(list):
+    def average_fill_price(self):
+        len_items = len(self[0]) ## assume all the same length
+        averages = [self._average_for_item(idx) for idx in range(len_items)]
+        return fillPrice(averages)
 
+    def _average_for_item(self, idx):
+        prices_for_item = [element.price[idx] for element in self]
+        prices_for_item = [price for price in prices_for_item if not np.isnan(price)]
+        return np.mean(prices_for_item)
+
+class listOfFillDatetime(list):
+    def final_fill_datetime(self):
+        valid_dates = [dt for dt in self if dt is not None]
+
+        return max(valid_dates)
 
 def resolve_trade_fill_fillprice(trade, fill, filled_price):
     resolved_trade = tradeQuantity(trade)
@@ -274,6 +292,9 @@ class Order(object):
         self._tradeable_object = tradeableObject(object_name)
 
         resolved_trade, resolved_fill, resolved_filled_price = resolve_trade_fill_fillprice(trade, fill, filled_price)
+
+        if children==[]:
+            children = no_children
 
         self._trade = resolved_trade
         self._fill = resolved_fill

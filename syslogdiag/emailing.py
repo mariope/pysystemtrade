@@ -88,7 +88,3 @@ def get_email_details():
 
     return email_server, email_address, email_pwd
 
-
-
-if __name__ == "__main__":
-    send_mail_msg("testing", "test subject")

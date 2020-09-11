@@ -9,7 +9,7 @@ from sysproduction.data.get_data import dataBlob
 from sysproduction.data.prices import diagPrices, updatePrices
 from sysproduction.data.broker import dataBroker
 from sysproduction.data.contracts import diagContracts
-from syslogdiag.emailing import send_mail_msg
+from sysproduction.diagnostic.emailing import send_production_mail_msg
 
 
 def update_historical_prices():
@@ -36,7 +36,7 @@ class updateHistoricalPrices(object):
             update_historical_prices_for_instrument(instrument_code, data, log=log.setup(instrument_code = instrument_code))
 
 
-def update_historical_prices_for_instrument(instrument_code, data):
+def update_historical_prices_for_instrument(instrument_code, data, log):
     """
     Do a daily update for futures contract prices, using IB historical data
 
@@ -45,7 +45,6 @@ def update_historical_prices_for_instrument(instrument_code, data):
     :param log: logger
     :return: None
     """
-    log = data.log
     diag_contracts = diagContracts(data)
     all_contracts_list = diag_contracts.get_all_contract_objects_for_instrument_code(instrument_code)
     contract_list = all_contracts_list.currently_sampling()
@@ -95,7 +94,7 @@ def get_and_add_prices_for_frequency(data, log, contract_object, frequency="D"):
                 contract_object)
             log.warn(msg)
             try:
-                send_mail_msg(msg, "Price Spike")
+                send_production_mail_msg(data, msg, "Price Spike %s" % contract_object.instrument_code)
             except:
                 log.warn("Couldn't send email about price spike for %s" % str(contract_object))
 

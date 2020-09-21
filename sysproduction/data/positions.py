@@ -12,14 +12,18 @@ class diagPositions(object):
         if data is arg_not_supplied:
             data = dataBlob()
 
-        data.add_class_list("mongoRollStateData mongoContractPositionData mongoStrategyPositionData mongoOptimalPositionData")
+        data.add_class_list("mongoRollStateData mongoContractPositionData mongoStrategyPositionData")
         self.data = data
+        self.log = data.log
 
     def get_roll_state(self, instrument_code):
         return self.data.db_roll_state.get_roll_state(instrument_code)
 
     def get_position_df_for_instrument_and_contract_id(self, instrument_code, contract_id):
         return self.data.db_contract_position.get_position_as_df_for_instrument_and_contract_date(instrument_code, contract_id)
+
+    def get_position_df_for_strategy_and_instrument(self,  strategy_name, instrument_code):
+        return self.data.db_strategy_position.get_position_as_df_for_strategy_and_instrument(strategy_name, instrument_code)
 
     def get_positions_for_instrument_and_contract_list(self, instrument_code, contract_list):
         list_of_positions = [self.get_position_for_instrument_and_contract_date(instrument_code, contract_date)
@@ -56,8 +60,8 @@ class diagPositions(object):
 
         return strats
 
-    def get_list_of_positions_for_strategy(self, strategy_name):
-        return self.data.db_strategy_position.get_list_of_instruments_for_strategy_with_position(strategy_name)
+    def get_all_current_positions_as_list_with_instrument_objects(self):
+        return self.data.db_strategy_position.get_all_current_positions_as_list_with_instrument_objects()
 
     def get_all_current_contract_positions(self):
         return self.data.db_contract_position.\
@@ -74,9 +78,6 @@ class diagPositions(object):
 
         return instrument_positions_from_contract.return_list_of_breaks(instrument_positions_from_strategies)
 
-    def optimal_position_data(self):
-        return self.data.db_optimal_position
-
     def get_list_of_contracts_with_any_contract_position_for_instrument(self, instrument_code):
         return self.data.\
             db_contract_position.get_list_of_contracts_with_any_position_for_instrument(instrument_code)
@@ -91,6 +92,47 @@ class diagPositions(object):
             db_contract_position.\
             get_list_of_contracts_with_any_position_for_instrument_in_date_range(instrument_code,
                                                                              start_date, end_date)
+
+class dataOptimalPositions(object):
+    def __init__(self, data = arg_not_supplied):
+        # Check data has the right elements to do this
+        if data is arg_not_supplied:
+            data = dataBlob()
+
+        data.add_class_list("mongoOptimalPositionData")
+        self.data = data
+        self.log = data.log
+
+    def get_list_of_instruments_for_strategy_with_optimal_position(self, strategy_name):
+        return self.data.db_optimal_position.get_list_of_instruments_for_strategy_with_optimal_position(strategy_name)
+
+    def get_current_optimal_position_for_strategy_and_instrument(self, strategy_name, instrument_code):
+        return self.data.db_optimal_position.get_current_optimal_position_for_strategy_and_instrument(strategy_name, instrument_code)
+
+    def get_optimal_position_as_df_for_strategy_and_instrument(self, strategy_name, instrument_code):
+        return self.data.db_optimal_position.get_optimal_position_as_df_for_strategy_and_instrument(strategy_name, instrument_code)
+
+    def update_optimal_position_for_strategy_and_instrument(self, strategy_name, instrument_code, position_entry):
+        self.data.db_optimal_position.update_optimal_position_for_strategy_and_instrument(strategy_name, instrument_code, position_entry)
+
+
+    def get_list_of_optimal_positions(self):
+        return self.data.db_optimal_position.get_list_of_optimal_positions()
+
+
+    def get_pd_of_position_breaks(self):
+        optimal_and_current = self.get_list_of_optimal_and_current_positions()
+
+        return optimal_and_current.as_pd_with_breaks()
+
+    def get_list_of_optimal_and_current_positions(self):
+        optimal_positions = self.get_list_of_optimal_positions()
+        position_data = diagPositions(self.data)
+        current_positions = position_data.get_all_current_positions_as_list_with_instrument_objects()
+        optimal_and_current = optimal_positions.add_positions(current_positions)
+
+        return optimal_and_current
+
 
 class updatePositions(object):
     def __init__(self, data = arg_not_supplied):
@@ -188,9 +230,4 @@ class updatePositions(object):
                       new_position_db))
 
 
-
-
-
-    def update_optimal_position_for_strategy_and_instrument(self, strategy_name, instrument_code, position_entry):
-        self.data.db_optimal_position.update_optimal_position_for_strategy_and_instrument(strategy_name, instrument_code, position_entry)
 

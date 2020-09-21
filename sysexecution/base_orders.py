@@ -1,6 +1,8 @@
 from copy import copy
 import datetime
 import numpy as np
+import pandas as pd
+
 from syscore.genutils import are_dicts_equal, none_to_object, object_to_none, sign
 from syscore.objects import  success,  no_order_id, no_children, no_parent, missing_order
 from syscore.genutils import sign
@@ -154,9 +156,13 @@ def apply_minima(trade_list, abs_list):
     ## for each item in _trade and abs_list, return the signed minimum of the zip
     ## eg if self._trade = [2,-2] and abs_list = [1,1], return [2,-2]
     abs_trade_list = [abs(x) for x in trade_list]
+    smallest_abs_leg = min(abs_trade_list)
+    if smallest_abs_leg==0:
+        # can't do this
+        return trade_list
+
     abs_size_ratio_list = [min([x,y])/float(x) for x,y in zip(abs_trade_list, abs_list)]
     min_abs_size_ratio = min(abs_size_ratio_list)
-    smallest_abs_leg = min(abs_trade_list)
     new_smallest_leg = np.floor(smallest_abs_leg *min_abs_size_ratio)
     ratio_applied = new_smallest_leg / smallest_abs_leg
     trade_list_with_ratio_as_float = [x*ratio_applied for x in trade_list]
@@ -553,3 +559,19 @@ class Order(object):
         """
 
         raise NotImplementedError
+
+class listOfOrders(list):
+    def as_pd(self):
+        date_list = [order.fill_datetime for order in self]
+        key_list = [order.key for order in self]
+        fill_list = [order.fill for order in self]
+        id_list = [order.order_id for order in self]
+        price_list = [order.filled_price for order in self]
+
+        pd_df = pd.DataFrame(dict(fill_datetime = date_list,
+                             key = key_list,
+                                  fill = fill_list,
+                                  price = price_list),
+                             index = id_list)
+
+        return pd_df

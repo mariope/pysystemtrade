@@ -1,9 +1,9 @@
 import pandas as pd
 
 from syscore.dateutils import get_datetime_input
-from syscore.genutils import run_interactive_menu, print_menu_of_values_and_get_response, get_and_convert
+from syscore.genutils import run_interactive_menu, print_menu_of_values_and_get_response, get_and_convert, print_menu_and_get_response
 from syscore.pdutils import set_pd_print_options
-from syscore.objects import user_exit
+from syscore.objects import user_exit, arg_not_supplied
 from sysexecution.base_orders import listOfOrders
 
 from sysproduction.data.get_data import dataBlob
@@ -13,10 +13,15 @@ from sysproduction.data.capital import dataCapital
 from sysproduction.data.contracts import get_valid_instrument_code_and_contractid_from_user, diagContracts
 from sysproduction.data.currency_data import currencyData, get_valid_fx_code_from_user
 from sysproduction.data.instruments import diagInstruments
+from sysproduction.data.logs import diagLogs
 from sysproduction.data.orders import dataOrders
 from sysproduction.data.positions import diagPositions, dataOptimalPositions
 from sysproduction.data.prices import get_valid_instrument_code_from_user, diagPrices
 from sysproduction.data.strategies import get_valid_strategy_name_from_user
+
+from sysproduction.diagnostic.emailing import retrieve_and_delete_stored_messages
+from sysproduction.diagnostic.reporting import run_report
+from sysproduction.diagnostic.report_configs import roll_report_config, daily_pandl_report_config, status_report_config, trade_report_config, reconcile_report_config
 
 
 def interactive_diagnostics():
@@ -49,9 +54,15 @@ nested_menu_of_options = {
                        4: 'HTML output'
                     },
 
-                    1: {10: 'nothing yet'
+                    1: {10: 'Roll report',
+                        11: 'P&L report',
+                        12: 'Status report',
+                        13: 'Trade report',
+                        14: 'Reconcile report'
                         },
-                    2: {20: 'nothing yet'
+                    2: {20: 'View stored emails',
+                        21: 'View errors',
+                        22: 'View logs'
                         },
                     3: {30: 'Individual futures contract prices',
                         31: 'Multiple prices',
@@ -103,6 +114,117 @@ def backtest_html(data):
     data_backtests.html_data_loop()
     return None
 
+# reports
+def roll_report(data):
+    instrument_code = get_valid_instrument_code_from_user(data, allow_all=True)
+    report_config = email_or_print(roll_report_config)
+    report_config.modify_kwargs(instrument_code = instrument_code)
+    run_report(report_config, data = data)
+
+def pandl_report(data):
+    start_date, end_date, calendar_days = get_report_dates(data)
+    report_config = email_or_print(daily_pandl_report_config)
+    report_config.modify_kwargs(calendar_days_back = calendar_days,
+                                start_date = start_date,
+                                end_date = end_date)
+    run_report(report_config, data = data)
+
+
+
+def status_report(data):
+    report_config = email_or_print(status_report_config)
+    run_report(report_config, data = data)
+
+def trade_report(data):
+    start_date, end_date, calendar_days = get_report_dates(data)
+    report_config = email_or_print(trade_report_config)
+    report_config.modify_kwargs(calendar_days_back = calendar_days,
+                                start_date = start_date,
+                                end_date = end_date)
+    run_report(report_config, data = data)
+
+def reconcile_report(data):
+    report_config = email_or_print(reconcile_report_config)
+    run_report(report_config, data = data)
+
+def email_or_print(report_config):
+    ans = get_and_convert("1: Email or 2: print?", type_expected=int, allow_default=True, default_str="Print",
+                    default_value=2)
+    if ans==1:
+        report_config = report_config.new_config_with_modified_output("email")
+    else:
+        report_config = report_config.new_config_with_modified_output("console")
+
+    return report_config
+
+def get_report_dates(data):
+    end_date = get_datetime_input("End date for report?\n", allow_default=True)
+    start_date = get_datetime_input("Start date for report? (SPACE to use an offset from end date)\n",
+                                    allow_no_arg=True)
+    if start_date is None:
+        start_date = arg_not_supplied
+        calendar_days = get_and_convert("Calendar days back from %s?" % str(end_date),
+                                        type_expected=int, allow_default=True,
+                                        default_value=1)
+
+    else:
+        calendar_days = arg_not_supplied
+
+    return start_date, end_date, calendar_days
+
+# logs emails errors
+def retrieve_emails(data):
+    subject = get_and_convert("Subject of emails (copy from emails)?",
+                              type_expected=str, allow_default=True, default_value=None)
+    messages = retrieve_and_delete_stored_messages(data, subject=subject)
+    for msg in messages:
+        print(msg)
+
+def view_errors(data):
+    diag_logs = diagLogs(data)
+    msg_levels = diag_logs.get_possible_log_level_mapping()
+    print("This will get all log messages with a given level of criticality")
+    print("Use view logs to filter by log attributes")
+    lookback_days = get_and_convert("How many days?", type_expected=int, default_value=7)
+    print("Which level of error/message?")
+    log_level = print_menu_and_get_response(msg_levels)
+    log_item_list = diag_logs.get_log_items_with_level(log_level, attribute_dict=dict(), lookback_days=lookback_days)
+    print_log_items(log_item_list)
+
+def view_logs(data):
+    diag_logs = diagLogs(data)
+    lookback_days = get_and_convert("How many days?", type_expected=int, default_value=7)
+    attribute_dict = build_attribute_dict(diag_logs, lookback_days)
+    log_item_list = diag_logs.get_log_items(attribute_dict=attribute_dict, lookback_days = lookback_days)
+    print(log_item_list)
+
+def print_log_items(log_item_list):
+    for log_item in log_item_list:
+        print(str(log_item)+"\n")
+
+def build_attribute_dict(diag_logs, lookback_days):
+    attribute_dict = {}
+    not_finished = True
+    while not_finished:
+        print("Attributes selected so far %s" % str(attribute_dict))
+        list_of_attributes = diag_logs.get_list_of_unique_log_attribute_keys(attribute_dict=attribute_dict,
+                                                                         lookback_days=lookback_days)
+        print("Which attribute to filter by?")
+        attribute_name = print_menu_of_values_and_get_response(
+                                                               list_of_attributes)
+        list_of_attribute_values = diag_logs.get_list_of_values_for_log_attribute(attribute_name,
+                                                                          attribute_dict=attribute_dict,
+                                                                          lookback_days=lookback_days)
+        print("Which value for %s ?" % attribute_name)
+        attribute_value = print_menu_of_values_and_get_response(
+                                                                list_of_attribute_values)
+        attribute_dict[attribute_name] = attribute_value
+        ans = input("Have you finished? (RETURN: No, anything else YES)")
+        if not ans=="":
+            not_finished = False
+            break
+
+    return attribute_dict
 
 ## prices
 def individual_prices(data):
@@ -313,9 +435,14 @@ dict_of_functions = {
                     2: backtest_plot,
                     3: backtest_print,
                     4: backtest_html,
-
-                    10: not_defined,
-                    20: not_defined,
+                    10: roll_report,
+                    11: pandl_report,
+                    12: status_report,
+                    13: trade_report,
+                    14: reconcile_report,
+                    20: retrieve_and_delete_stored_messages,
+                    21: view_errors,
+                    22: view_logs,
                     30: individual_prices,
                     31: multiple_prices,
                     32: adjusted_prices,

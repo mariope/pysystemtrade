@@ -21,7 +21,7 @@ KR3,1000000,Bond,KRW,0.005,0,4E-05,0,Korean 3 year bond
 LEANHOG,400,Ags,USD,0.025,2.9,0,0,Lean hogs
 LIVECOW,400,Ags,USD,0.025,2.9,0,0,Live cattle
 MXP,500000,FX,USD,1.1567E-05,2.46,0,0,MEXUSD currency
-NASDAQ,20,Equity,USD,0.125,2.05,0,0,US equity index Nasdaq 
+NASDAQ,20,Equity,USD,0.125,2.05,0,0,US equity index Nasdaq
 NZD,100000,FX,USD,0.000107147,2.46,0,0,NZDUSD currency
 OAT,1000,Bond,EUR,0.005,2,0,0,French 10 year bond OAT
 PALLAD,100,Metals,USD,0.3738801253,2.31,0,0,Palladium
@@ -29,7 +29,7 @@ PLAT,50,Metals,USD,0.2401075437,2.31,0,0,Platinum
 SHATZ,1000,Bond,EUR,0.0025,2,0,0,German 2 year bond Schatz
 SMI,10,Equity,CHF,1,4,0,0,Swiss equity index SMI
 SOYBEAN,50,Ags,USD,0.125,2.9,0,0,Soybean
-SP500,50,Equity,USD,0.125,2.05,0,0,US equity index S&P500 
+SP500,50,Equity,USD,0.125,2.05,0,0,US equity index S&P500
 US10,1000,Bond,USD,0.008,1.51,0,0,US 10 year bond note
 US2,2000,Bond,USD,0.004,1.51,0,0,US 2 year bond note
 US20,1000,Bond,USD,0.016,1.51,0,0,US 20 year bond
@@ -37,3 +37,47 @@ US5,1000,Bond,USD,0.004,1.51,0,0,US 5 year bond note
 V2X,100,Vol,EUR,0.0255,2,0,0,Vol European equity V2X
 VIX,1000,Vol,USD,0.0255,2.2,0,0,Vol US equity VIX
 WHEAT,50,Ags,USD,0.25,2.9,0,0,Wheat
+CAD_SGD,1,FX,SGD,0.00016,0.00016,0,0,CFD Oanda CAD/SGD currency
+GBP_NZD,1,FX,NZD,0.00025,0.00025,0,0,CFD Oanda currency GBP/NZD
+EUR_GBP,1,FX,GBP,0.00009,0.00009,0,0,CFD Oanda currency EUR/GBP
+NZD_CAD,1,FX,CAD,0.000125,0.000125,0,0,CFD Oanda currency NZD/CAD
+EUR_SGD,1,FX,SGD,0.00025,0.00025,0,0,CFD Oanda currency EUR/SGD
+USD_MXN,1,FX,MXN,0.003,0.003,0,0,CFD Oanda currency USD/MXN
+GBP_USD,1,FX,USD,0.0001,0.0001,0,0,CFD Oanda currency GBP/USD
+EUR_AUD,1,FX,AUD,0.00015,0.00015,0,0,CFD Oanda currency EUR/AUD
+EUR_USD,1,FX,USD,0.00008,0.00008,0,0,CFD Oanda currency EUR/USD
+UK100_GBP,1,Equity,USD,0.8,0.8,0,0,CFD Oanda UK equity index FTSE 100
+HK33_HKD,1,Equity,HKD,2.5,2.5,0,0,CFD Oanda Hong Kong 33
+FR40_EUR,1,Equity,EUR,0.6,0.6,0,0,CFD Oanda France 40
+IN50_USD,1,Equity,USD,2,2,0,0,CFD Oanda India 50
+TWIX_USD,1,Equity,USD,0.2,0.2,0,0,CFD Oanda Taiwan Index
+JP225_USD,1,Equity,USD,3.5,3.5,0,0,CFD Oanda Japan 225
+EU50_EUR,1,Equity,EUR,0.7,0.7,0,0,CFD Oanda Europe 50
+CN50_USD,1,Equity,USD,5,5,0,0,CFD Oanda China A50
+DE30_EUR,1,Equity,EUR,1,1,0,0,CFD Oanda Germany 30
+US2000_USD,1,Equity,USD,0.15,0.15,0,0,CFD Oanda US Russell 2000
+NL25_EUR,1,Equity,EUR,0.12,0.12,0,0,CFD Oanda Netherlands 25
+US30_USD,1,Equity,USD,0.8,0.8,0,0,CFD Oanda US Wall St 30
+AU200_AUD,1,Equity,AUD,1.5,1.5,0,0,CFD Oanda Australia 200
+NAS100_USD,1,Equity,USD,0.25,0.25,0,0,CFD Oanda US Nas 100
+SPX500_USD,1,Equity,USD,0.15,0.15,0,0,CFD Oanda US SPX 500
+SG30_SGD,1,Equity,SGD,0.15,0.15,0,0,CFD Oanda Singapore 30
+USB05Y_USD,1,Bond,USD,0.009,0.009,0,0,CFD Oanda US 5Y T-Note
+USB02Y_USD,1,Bond,USD,0.004,0.004,0,0,CFD Oanda US 2Y T-Note
+USB10Y_USD,1,Bond,USD,0.013,0.013,0,0,CFD Oanda US 10Y T-Note
+DE10YB_EUR,1,Bond,EUR,0.007,0.007,0,0,CFD Oanda Bund
+UK10YB_GBP,1,Bond,GBP,0.015,0.015,0,0,CFD Oanda UK 10Y Gilt
+USB30Y_USD,1,Bond,USD,0.02,0.02,0,0,CFD Oanda US T-Bond
+XAG_EUR,1,Metals,EUR,0.0125,0.0125,0,0,CFD Oanda Silver/EUR
+XAG_USD,1,Metals,USD,0.0125,0.0125,0,0,CFD Oanda Silver
+XPT_USD,1,Metals,USD,2,2,0,0,CFD Oanda Platinum
+XAU_USD,1,Metals,USD,0.2,0.2,0,0,CFD Oanda Gold
+XPD_USD,1,Metals,USD,10,10,0,0,CFD Oanda Palladium
+XCU_USD,1,Metals,USD,0.0008,0.0008,0,0,CFD Oanda Copper
+BCO_USD,1,OilGas,USD,0.015,0.015,0,0,CFD Oanda Brent Crude Oil
+WTICO_USD,1,OilGas,USD,0.015,0.015,0,0,CFD Oanda West Texas Oil
+NATGAS_USD,1,OilGas,USD,0.005,0.005,0,0,CFD Oanda Natural Gas
+CORN_USD,1,Ags,USD,0.005,0.005,0,0,CFD Oanda Corn
+SUGAR_USD,1,Ags,USD,0.0012,0.0012,0,0,CFD Oanda Sugar
+WHEAT_USD,1,Ags,USD,0.005,0.005,0,0,CFD Oanda Wheat
+SOYBN_USD,1,Ags,USD,0.01,0.01,0,0,CFD Oanda Soybeans

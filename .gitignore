@@ -9,12 +9,17 @@ dist
 build
 private
 restats
-
+*.DS_Store
 # Coverage reports
 .coverage
 .coverage.*
+*.csv
 
-# editor 
+# editor
 .idea
 .project
 .pydevproject
+
+1.4.2
+1.4.3
+=

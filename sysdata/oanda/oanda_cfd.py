@@ -114,7 +114,11 @@ class oandaFuturesContractPrices(futuresContractPrices):
         print(contract_data.tail(3))
         try:
             print("trying try")
-            contract_data.columns = ['OPEN', 'FINAL', 'HIGH', 'LOW']
+            # contract_data.columns = ['OPEN', 'FINAL', 'HIGH', 'LOW']
+
+            contract_data.columns = ['OPEN', 'HIGH', 'LOW', 'FINAL']
+            contract_data=contract_data[['OPEN', 'FINAL', 'HIGH', 'LOW']]
+
             new_data = contract_data.copy()
             # new_data = pd.DataFrame(dict(OPEN=contract_data['Open'],
             #                              FINAL=contract_data['Close'],
@@ -137,6 +141,6 @@ class oandaFuturesContractPrices(futuresContractPrices):
                                                  LOW=contract_data.Low))
                 except:
                     raise Exception(
-                        "Quandl API error: data fields %s are not as expected" % ",".join(list(contract_data.columns)))
+                        "Oanda API error: data fields %s are not as expected" % ",".join(list(contract_data.columns)))
 
         super().__init__(new_data)

@@ -4,6 +4,8 @@ For a given list of undated instruments defined by Oanda start dates:
 read price data from oanda, and then write to artic
 Write list of undated instruments to mongodb database
 """
+from sysdata.oanda.oanda_cfd import oandaFuturesContractPriceData
+
 from sysdata.arctic.arctic_adjusted_prices import arcticFuturesAdjustedPricesData
 from sysdata.csv.csv_adjusted_prices import csvFuturesAdjustedPricesData
 
@@ -23,7 +25,7 @@ def get_and_write_prices_for_contract_list_from_oanda_to_arctic(instrument_code)
     else:
         print("Read ok, trying to write to arctic")
         try:
-            arctic_adjusted_prices.add_adjusted_prices(instrument_code, adjusted_prices, ignore_duplication=True)
+            # arctic_adjusted_prices.add_adjusted_prices(instrument_code, adjusted_prices, ignore_duplication=True)
             csv_adjusted_prices.add_adjusted_prices(instrument_code, adjusted_prices, ignore_duplication=True)
         except:
             raise Exception("Some kind of issue with arctic - stopping so you can fix it")

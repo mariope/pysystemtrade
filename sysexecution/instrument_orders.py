@@ -1,5 +1,8 @@
 import datetime
 
+from syscore.genutils import none_to_object, object_to_none
+from syscore.objects import missing_order, success, zero_order
+
 from sysexecution.order_stack import orderStackData
 from sysexecution.base_orders import (
     Order,
@@ -9,8 +12,6 @@ from sysexecution.base_orders import (
     no_children,
     no_parent,
 )
-from syscore.genutils import none_to_object, object_to_none
-from syscore.objects import missing_order, success, zero_order
 
 possible_order_types = [
     "best",
@@ -392,3 +393,4 @@ class instrumentOrderStackData(orderStackData):
             adjusted_order)
 
         return order_id_or_error
+

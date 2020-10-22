@@ -3,14 +3,16 @@ IB connection using ib-insync https://ib-insync.readthedocs.io/api.html
 
 """
 
+import time
+
 from ib_insync import IB
 
 from sysbrokers.IB.ibClient import ibClient
 from sysbrokers.IB.ibServer import ibServer
 from syscore.genutils import get_safe_from_dict
-from syscore.objects import arg_not_supplied
+from syscore.objects import arg_not_supplied, missing_data
 
-from sysdata.private_config import get_list_of_private_then_default_key_values
+from sysdata.private_config import get_list_of_private_then_default_key_values, get_private_then_default_key_value
 from syslogdiag.log import logtoscreen
 from sysdata.mongodb.mongo_connection import mongoConnection, mongoDb
 
@@ -55,6 +57,16 @@ def ib_defaults(**kwargs):
     idoffset = yaml_dict.get("idoffset", DEFAULT_IB_IDOFFSET)
 
     return ipaddress, port, idoffset
+
+def get_broker_account() -> str:
+
+    account_id = get_private_then_default_key_value(
+        "broker_account", raise_error=False
+    )
+    if account_id is missing_data:
+        return arg_not_supplied
+    else:
+        return account_id
 
 
 class connectionIB(ibClient, ibServer):
@@ -103,9 +115,17 @@ class connectionIB(ibClient, ibServer):
         ibServer.__init__(self, log=log)
         ibClient.__init__(self, log=log)
 
-        # this is all very IB specific
         ib = IB()
-        ib.connect(ipaddress, port, clientId=client)
+
+        account = get_broker_account()
+        if account is missing_data:
+            self.log.error("Broker account ID not found in private config - may cause issues")
+            ib.connect(ipaddress, port, clientId=client, account=account)
+        else:
+            ib.connect(ipaddress, port, clientId=client, account=account)
+
+        # Attempt to fix connection bug
+        time.sleep(5)
 
         # Add handlers, from ibServer methods
         ib.errorEvent += self.error_handler
@@ -202,29 +222,22 @@ class mongoIBclientIDtracker(object):
 
         return clientid_to_use
 
-    def get_next_clientid(self):
+    def get_next_clientid(self) -> int:
         """
         Returns a client id which will be locked so no other use can use it
         The clientid in question is the lowest available unused value
         :return: clientid
         """
 
-        current_list = self._get_list_of_clientids()
-        if len(current_list) == 0:
-            next_id = self._idoffset
-        else:
-            full_set = set(
-                range(self._idoffset, max(current_list) + 2)
-            )  # includes next value up in case no space
-            missing_values = full_set - set(current_list)
-            next_id = min(missing_values)
+        current_list_of_ids = self._get_list_of_clientids()
+        next_id = get_next_id_from_current_list(current_list_of_ids, id_offset=self._idoffset)
 
         # lock
         self._add_clientid(next_id)
 
         return next_id
 
-    def _get_list_of_clientids(self):
+    def _get_list_of_clientids(self) -> list:
         cursor = self._mongo.collection.find()
         clientids = [db_entry["client_id"] for db_entry in cursor]
 
@@ -252,3 +265,28 @@ class mongoIBclientIDtracker(object):
 
         self._mongo.collection.delete_one(dict(client_id=clientid))
         self.log.msg("Released ID %d" % clientid)
+
+def get_next_id_from_current_list(current_list_of_ids: list, id_offset: int = 0) -> int:
+    if len(current_list_of_ids) == 0:
+        # no IDS in use
+        return id_offset
+
+    full_set_of_available_ids = set(
+        range(id_offset, max(current_list_of_ids) + 1)
+    )
+
+    next_id = get_next_id_from_current_list_and_full_set(current_list_of_ids, full_set_of_available_ids)
+
+    return next_id
+
+
+def get_next_id_from_current_list_and_full_set(current_list_of_ids: list, full_set_of_available_ids: set) -> int:
+
+    unused_values = full_set_of_available_ids - set(current_list_of_ids)
+    if len(unused_values)==0:
+        # no gaps, return the higest number plus 1
+        return max(current_list_of_ids) + 1
+    else:
+        # there is a gap, use the lowest numbered one
+        return min(unused_values)
+

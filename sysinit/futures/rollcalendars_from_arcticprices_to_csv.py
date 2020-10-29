@@ -60,3 +60,9 @@ def build_and_write_roll_calendar(
         print("Not writing")
 
     return roll_calendar
+
+# Create roll calendar
+if __name__ == '__main__':
+    instrument_code='mWHEAT'
+    output_datapath = "/Users/Mario/Library/Mobile Documents/com~apple~CloudDocs/TradingDesk/TOPRpylib/pysystemtrade/data/futures/roll_calendars_csv"
+    build_and_write_roll_calendar(instrument_code, output_datapath, check_before_writing=True)

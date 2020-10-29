@@ -5,7 +5,7 @@ Get data from oanda for CFDs
 from sysdata.futures.contracts import futuresContract
 from sysdata.futures.futures_per_contract_prices import futuresContractPriceData, futuresContractPrices
 from syscore.fileutils import get_filename_for_package
-from sysdata.oanda.oanda_utils import load_private_key
+from sysdata.ib.ib_utils import load_private_key
 
 import json
 import oandapyV20

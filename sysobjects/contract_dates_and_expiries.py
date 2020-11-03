@@ -158,7 +158,12 @@ class contractDate(object):
     def expiry_date(self):
         return self._expiry_date
 
+    # not using a setter as shouldn't be done casually
+    def update_expiry_date(self, expiry_date: expiryDate):
+        self._expiry_date = expiry_date
+
     def as_dict(self):
+        ## safe, db independent way of storing expiry dates
         expiry_date = self.expiry_date.as_tuple()
 
         # we do this so that we can init the object again from this with the
@@ -175,6 +180,10 @@ class contractDate(object):
         # needs to match output from as_dict
 
         expiry_date = results_dict.get("expiry_date", NO_EXPIRY_DATE_PASSED)
+
+        if expiry_date is not NO_EXPIRY_DATE_PASSED:
+            expiry_date = expiryDate(*expiry_date)
+
         contract_id = results_dict["contract_date"]
 
         return contractDate(
